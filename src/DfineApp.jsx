@@ -47,7 +47,7 @@ async function callClaude(messages, system, img = null, maxTokens = 800) {
     ];
   }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST", headers:{"Content-Type":"application/json"},
+    method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
     body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:maxTokens, system,
       messages:[...messages.slice(0,-1), {role:last.role, content}] })
   });
@@ -1378,7 +1378,7 @@ function DressScreen({ wardrobe, brandDNA, setScreen }) {
       const start = new Date(today); start.setHours(0,0,0,0);
       const end   = new Date(today); end.setHours(23,59,59,999);
       const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json"},
+        method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:1000,
           mcp_servers:[{ type:"url", url:"https://calendarmcp.googleapis.com/mcp/v1", name:"google-calendar" }],
