@@ -47,7 +47,7 @@ async function callClaude(messages, system, img = null, maxTokens = 800) {
     ];
   }
   const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:maxTokens, system,
       messages:[...messages.slice(0,-1), {role:last.role, content}] })
   });
@@ -60,13 +60,16 @@ function parseJSON(t) {
   catch { return null; }
 }
 
+function extractInsight(t) { const m = t.match(/<INSIGHT>([\s\S]*?)<\/INSIGHT>/); return m ? m[1].trim() : null; }
+function stripInsight(t)    { return t.replace(/<INSIGHT>[\s\S]*?<\/INSIGHT>/g,"").trim(); }
+
 async function sGet(k) {
   try { const r = await window.storage.get(k); return r ? JSON.parse(r.value) : null; } catch { return null; }
 }
 async function sSet(k,v) { try { await window.storage.set(k, JSON.stringify(v)); } catch {} }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SCREENS    = { HOME:"home", BRAND:"brand", SIGNATURE:"signature", WARDROBE:"wardrobe", DRESS:"dress", ABOUT:"about" };
+const SCREENS    = { HOME:"home", INDUCTION:"induction", BRAND:"brand", SIGNATURE:"signature", WARDROBE:"wardrobe", DRESS:"dress", ABOUT:"about", CHANGEROOM:"changeroom" };
 const CATEGORIES = ["Tops","Bottoms","Outerwear","Dresses & Suits","Shoes","Accessories","Bags","Other"];
 const OUTFIT_ACCENTS = ["var(--teal)","var(--green)","#0F6E56"];
 
@@ -292,6 +295,57 @@ End on what they want to be known for. The last sentence should feel like the th
 Return ONLY the paragraph text. No preamble, no explanation, no formatting. 3–4 sentences. No more.`;
 
 
+// Prospective purchase assessment — Change-Room Validator
+const buildChangeRoomSystem = (dna, context) => `You are a perceptive style confidant helping someone make a purchasing decision — not auditing what they own. This is a prospective purchase assessment: the user is considering buying this item right now.
+
+${dna ? `BRAND DNA:\n${dna}\n` : "No brand profile yet. Assess in a general professional register.\n"}
+${context?.occasion ? `OCCASION: ${context.occasion}` : ""}
+${context?.retailer ? `RETAILER: ${context.retailer}` : ""}
+
+PROSPECTIVE PURCHASE FRAMING: This person is in the decision moment. Give them a verdict they can act on immediately. Be decisive. Consider:
+- Versatility: Is this a capsule piece or occasion-specific?
+- Gap-filling: Does it address a genuine brand gap or duplicate existing wardrobe?
+- Opportunity cost: Is there a better version of this they should look for instead?
+
+FOUR ANALYTICAL DIMENSIONS:
+1. SOCIAL CATEGORY — What professional tribe or archetype does this signal? Legible and consistent with their brand?
+2. COGNITIVE STATE — Would wearing this read as contextually appropriate for the stated occasion? Purposeful presence?
+3. STATUS — Fit, quality cues, conspicuous vs. inconspicuous signalling, sprezzatura?
+4. AESTHETIC COHERENCE — Does it look considered? Would it integrate with their brand direction?
+
+Return ONLY valid JSON:
+{
+  "itemDescription": "Type, colour, cut — as you'd tell a friend (max 20 words)",
+  "verdict": "✦ Buy It",
+  "verdictLabel": "Strongly On Brand",
+  "confidence": 87,
+  "brandTags": ["Quiet Authority","Versatile Investment"],
+  "signals": { "socialCategory": 7, "cognitiveState": 8, "status": 7, "aestheticCoherence": 8 },
+  "rationale": "2–3 sentences. What this item signals and why it fits (or doesn't) their brand. Reference the occasion if stated.",
+  "actionableGuidance": "Decisive, specific guidance. If buying: when and how to wear it. If caveats: what to pair, what to watch. If misaligned: what to look for instead.",
+  "occasionFit": "How well this suits the stated occasion (or professional contexts generally if none stated). One sentence.",
+  "gapAnalysis": "Is this filling a genuine wardrobe gap or duplicating existing items? One sentence."
+}
+Verdict options: "✦ Buy It" | "◈ Buy with Caveats" | "✕ Pass on This"
+VerdictLabel options: "Strongly On Brand" | "On Brand with Caveats" | "Brand Misalignment"
+Confidence: 0–100 (how certain based on available information)`;
+
+const crVerdictColor = v => {
+  if (!v) return "var(--muted)";
+  if (v.includes("Buy It"))  return "var(--green)";
+  if (v.includes("Caveats")) return "var(--amber)";
+  if (v.includes("Pass"))    return "var(--red)";
+  return "var(--muted)";
+};
+
+const crVerdictBg = v => {
+  if (!v) return "rgba(118,116,112,0.07)";
+  if (v.includes("Buy It"))  return "rgba(42,122,88,0.07)";
+  if (v.includes("Caveats")) return "rgba(176,106,32,0.07)";
+  if (v.includes("Pass"))    return "rgba(160,53,53,0.07)";
+  return "rgba(118,116,112,0.07)";
+};
+
 function MirrorMark({ size=26, color="var(--teal)" }) {
   return (
     <div style={{ width:size, height:size, borderRadius:"50%", border:`1.5px solid ${color}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
@@ -370,14 +424,15 @@ function SignalRadar({ signals, compact=false }) {
 }
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
-function Nav({ screen, setScreen, wardrobeCount, hasDNA, onShowOnboarding }) {
+function Nav({ screen, setScreen, wardrobeCount, consideringCount, hasDNA, onShowOnboarding }) {
   const tabs = [
-    { id:SCREENS.HOME,      label:"Home",                              locked:false },
-    { id:SCREENS.BRAND,     label:"My Brand",    dot:hasDNA,           locked:false },
-    { id:SCREENS.SIGNATURE, label:"Signature",   dot:hasDNA,           locked:!hasDNA },
-    { id:SCREENS.ABOUT,     label:"Your About",  dot:hasDNA,           locked:!hasDNA },
-    { id:SCREENS.WARDROBE,  label:wardrobeCount>0?`Wardrobe (${wardrobeCount})`:"Wardrobe", locked:!hasDNA },
-    { id:SCREENS.DRESS,     label:"Dress For…",                        locked:!hasDNA },
+    { id:SCREENS.HOME,       label:"Home",                              locked:false },
+    { id:SCREENS.BRAND,      label:"My Brand",    dot:hasDNA,           locked:false },
+    { id:SCREENS.SIGNATURE,  label:"Signature",   dot:hasDNA,           locked:!hasDNA },
+    { id:SCREENS.ABOUT,      label:"Your About",  dot:hasDNA,           locked:!hasDNA },
+    { id:SCREENS.WARDROBE,   label:wardrobeCount>0?`Wardrobe (${wardrobeCount})`:"Wardrobe", locked:!hasDNA },
+    { id:SCREENS.DRESS,      label:"Dress For…",                        locked:!hasDNA },
+    { id:SCREENS.CHANGEROOM, label:consideringCount>0?`Change Room (${consideringCount})`:"Change Room", locked:!hasDNA },
   ];
   return (
     <nav style={{ position:"fixed", top:0, left:0, right:0, zIndex:100, background:"rgba(248,247,245,0.95)", backdropFilter:"blur(10px)", borderBottom:"1px solid var(--border)", height:56, display:"flex", alignItems:"center", justifyContent:"space-between", paddingLeft:16, paddingRight:8 }}>
@@ -403,13 +458,355 @@ function Nav({ screen, setScreen, wardrobeCount, hasDNA, onShowOnboarding }) {
   );
 }
 
+// ─── INDUCTION FLOW ───────────────────────────────────────────────────────────
+// Ten-screen guided Mirror journey for first-time users.
+// Screens: 0=process, 1–6=conversation steps, 7=synthesis/reveal, 8=next steps.
+
+function InductionProcessScreen({ onNext }) {
+  return (
+    <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", maxWidth:520, margin:"0 auto", padding:"52px 24px 48px" }}>
+      <div style={{ animation:"fadeUp 0.6s ease both", marginBottom:32 }}>
+        <Logo />
+        <div style={{ marginTop:28 }}>
+          <Cap style={{ marginBottom:10 }}>The Mirror</Cap>
+          <h2 style={{ fontFamily:"var(--serif)", fontSize:"clamp(26px,6vw,36px)", fontWeight:400, lineHeight:1.1, marginBottom:14 }}>
+            Six conversations.<br/>One clear picture.
+          </h2>
+          <p style={{ fontSize:14, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>
+            Each conversation explores one dimension of your professional identity.
+            At the end, we synthesise everything into your Brand DNA — a precise articulation
+            you'll use across every professional surface.
+          </p>
+        </div>
+      </div>
+      <div style={{ flex:1 }}>
+        {STEPS.map((step, i) => (
+          <div key={step.key} style={{ display:"flex", alignItems:"flex-start", gap:16, padding:"13px 0",
+            borderBottom: i < STEPS.length-1 ? "1px solid var(--border)" : "none",
+            animation:`fadeUp 0.5s ${0.08+i*0.07}s ease both`, opacity:0 }}>
+            <span style={{ fontFamily:"var(--serif)", fontSize:15, color:"var(--teal-lt)", fontWeight:300, minWidth:26, paddingTop:1 }}>{step.num}</span>
+            <div>
+              <p style={{ fontSize:13, fontWeight:400, color:"var(--ink)", marginBottom:2 }}>{step.label}</p>
+              <p style={{ fontSize:12, color:"var(--muted)", fontWeight:300 }}>{step.sub}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ paddingTop:28, borderTop:"1px solid var(--border)", marginTop:8, animation:"fadeUp 0.5s 0.55s ease both", opacity:0 }}>
+        <p style={{ fontFamily:"var(--serif)", fontStyle:"italic", fontSize:15, fontWeight:300, color:"var(--muted)", lineHeight:1.7, marginBottom:24, paddingLeft:14, borderLeft:"2px solid var(--teal-bg)" }}>
+          It sounds like… not You are… — this is a mirror, not a prescription.
+        </p>
+        <button onClick={onNext} style={{ width:"100%", background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.17em", textTransform:"uppercase", padding:"15px 0", cursor:"pointer" }}>
+          Start The Mirror
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existingInsight }) {
+  const [msgs,    setMsgs]    = useState([]);
+  const [input,   setInput]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [insight, setInsight] = useState(existingInsight || null);
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState(existingInsight || "");
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs, loading, insight]);
+  useEffect(() => { if (msgs.length === 0) open(); }, []);
+
+  async function open() {
+    setLoading(true);
+    try {
+      const reply = await callClaude([{ role:"user", content:"Begin." }], STEP_PROMPTS[step.key], 600);
+      const found = extractInsight(reply);
+      setMsgs([{ role:"assistant", content:stripInsight(reply) }]);
+      if (found && !existingInsight) { setInsight(found); setEditVal(found); }
+    } catch { setMsgs([{ role:"assistant", content:"Something went wrong. Please reload and try again." }]); }
+    setLoading(false);
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || loading) return;
+    const history = [...msgs, { role:"user", content:text }];
+    setMsgs(history); setInput(""); setLoading(true);
+    try {
+      const reply = await callClaude(history, STEP_PROMPTS[step.key], 600);
+      const found = extractInsight(reply);
+      setMsgs(prev => [...prev, { role:"assistant", content:stripInsight(reply) }]);
+      if (found) { setInsight(found); setEditVal(found); }
+    } catch { setMsgs(prev => [...prev, { role:"assistant", content:"Something went wrong. Please try again." }]); }
+    setLoading(false);
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }
+
+  const progress = ((stepIndex+1)/totalSteps)*100;
+  const isLast   = stepIndex === totalSteps-1;
+
+  return (
+    <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", maxWidth:560, margin:"0 auto" }}>
+      {/* Sticky header */}
+      <div style={{ position:"sticky", top:0, zIndex:20, background:"rgba(248,247,245,0.97)", backdropFilter:"blur(10px)", borderBottom:"1px solid var(--border)", padding:"13px 20px 11px" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:9 }}>
+          <Logo />
+          <span style={{ fontSize:10, color:"var(--muted)", letterSpacing:"0.1em" }}>{stepIndex+1} of {totalSteps}</span>
+        </div>
+        <div style={{ height:2, background:"var(--border)", borderRadius:2, overflow:"hidden" }}>
+          <div style={{ height:"100%", width:`${progress}%`, background:"var(--teal)", borderRadius:2, transition:"width 0.7s cubic-bezier(0.34,1.56,0.64,1)" }} />
+        </div>
+        <div style={{ display:"flex", alignItems:"baseline", gap:8, marginTop:7 }}>
+          <Cap>{step.num}</Cap>
+          <p style={{ fontFamily:"var(--serif)", fontSize:15, fontWeight:400 }}>{step.label}</p>
+        </div>
+      </div>
+
+      {/* Conversation */}
+      <div style={{ flex:1, padding:"24px 20px 12px", display:"flex", flexDirection:"column", gap:20 }}>
+        {msgs.map((m, i) => (
+          <div key={i} style={{ animation:"fadeUp 0.4s ease both", display:"flex", flexDirection:"column", alignItems:m.role==="user"?"flex-end":"flex-start" }}>
+            {m.role==="assistant" ? (
+              <div style={{ display:"flex", alignItems:"flex-start", gap:10, maxWidth:"90%" }}>
+                <div style={{ marginTop:3, flexShrink:0 }}><MirrorMark size={17} color="var(--teal-lt)" /></div>
+                <p style={{ fontSize:14, lineHeight:1.85, fontWeight:300, whiteSpace:"pre-wrap" }}>{m.content}</p>
+              </div>
+            ) : (
+              <div style={{ maxWidth:"82%", padding:"10px 14px", background:"white", boxShadow:"var(--shadow)" }}>
+                <p style={{ fontSize:14, lineHeight:1.75, fontWeight:300, whiteSpace:"pre-wrap" }}>{m.content}</p>
+              </div>
+            )}
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display:"flex", alignItems:"center", gap:10, animation:"fadeIn 0.3s ease" }}>
+            <MirrorMark size={17} color="var(--teal-lt)" />
+            <div style={{ display:"flex", gap:4 }}>
+              {[0,1,2].map(j => <div key={j} style={{ width:5, height:5, borderRadius:"50%", background:"var(--teal-lt)", animation:`pulse 1.2s ${j*0.2}s ease infinite` }} />)}
+            </div>
+          </div>
+        )}
+        {/* Insight capture card */}
+        {insight && !loading && (
+          <div style={{ animation:"pop 0.5s ease both", border:"1px solid rgba(29,158,117,0.22)", background:"var(--teal-bg)", padding:"16px 16px", marginTop:4 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:10 }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:"var(--teal)" }} />
+              <Cap>Insight captured</Cap>
+            </div>
+            {editing ? (
+              <>
+                <textarea autoFocus value={editVal} onChange={e => setEditVal(e.target.value)} rows={3}
+                  style={{ width:"100%", fontFamily:"var(--serif)", fontStyle:"italic", fontSize:15, fontWeight:400, lineHeight:1.65, color:"var(--ink)", background:"white", border:"1px solid rgba(29,158,117,0.22)", padding:"12px 14px", resize:"none", outline:"none", boxShadow:"var(--shadow)" }} />
+                <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                  <button onClick={() => { setInsight(editVal.trim()); setEditing(false); }} style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.14em", textTransform:"uppercase", padding:"9px 18px", cursor:"pointer" }}>Save</button>
+                  <button onClick={() => setEditing(false)} style={{ background:"none", border:"1.5px solid var(--border)", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:10, letterSpacing:"0.12em", textTransform:"uppercase", padding:"9px 16px", cursor:"pointer" }}>Cancel</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p style={{ fontFamily:"var(--serif)", fontStyle:"italic", fontSize:15, fontWeight:400, lineHeight:1.65, color:"var(--ink)", marginBottom:14, paddingBottom:14, borderBottom:"1px solid rgba(29,158,117,0.22)" }}>
+                  "{insight}"
+                </p>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:8 }}>
+                  <button onClick={() => onComplete(insight)} style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.16em", textTransform:"uppercase", padding:"11px 22px", cursor:"pointer" }}>
+                    {isLast ? "Finish The Mirror →" : "Capture & continue →"}
+                  </button>
+                  <button onClick={() => { setEditVal(insight); setEditing(true); }} style={{ background:"none", border:"none", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:10, letterSpacing:"0.1em", textTransform:"uppercase", textDecoration:"underline", textUnderlineOffset:3, cursor:"pointer" }}>
+                    Edit this
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <div ref={bottomRef} style={{ paddingBottom:8 }} />
+      </div>
+
+      {/* Input */}
+      <div style={{ position:"sticky", bottom:0, background:"rgba(248,247,245,0.97)", backdropFilter:"blur(10px)", borderTop:"1px solid var(--border)", padding:"11px 20px 14px" }}>
+        <div style={{ display:"flex", gap:9, alignItems:"flex-end" }}>
+          <textarea ref={inputRef} value={input} placeholder={insight ? "Refine this further…" : "Take your time. There are no wrong answers…"}
+            onChange={e => { setInput(e.target.value); e.target.style.height="auto"; e.target.style.height=Math.min(e.target.scrollHeight,100)+"px"; }}
+            onKeyDown={e => { if (e.key==="Enter"&&!e.shiftKey) { e.preventDefault(); send(); } }}
+            rows={1} style={{ flex:1, fontFamily:"var(--sans)", fontSize:14, fontWeight:300, color:"var(--ink)", background:"transparent", border:"none", lineHeight:1.65, minHeight:26, maxHeight:100, padding:"3px 0", opacity:insight?0.55:1, resize:"none", outline:"none" }} />
+          <button onClick={send} disabled={!input.trim()||loading}
+            style={{ width:32, height:32, borderRadius:"50%", border:"none", background:input.trim()&&!loading?"var(--teal)":"var(--border)", color:"white", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", transition:"background 0.2s", flexShrink:0, cursor:input.trim()&&!loading?"pointer":"default" }}>
+            {loading ? <Spinner size={12} /> : "↑"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InductionSynthesisingScreen() {
+  const [si, setSi] = useState(0);
+  const stages = ["Reading what you said…","Finding the pattern…","Distilling the signal…","Composing your Brand DNA…"];
+  useEffect(() => { const t = setInterval(() => setSi(i => (i+1)%stages.length), 2000); return () => clearInterval(t); }, []);
+  return (
+    <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:28, padding:48 }}>
+      <div style={{ animation:"breathe 4s ease-in-out infinite", width:72, height:72, borderRadius:"50%", border:"1.5px solid var(--bstrong)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+        <div style={{ width:46, height:46, borderRadius:"50%", border:"1px solid var(--border)", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <MirrorMark size={22} />
+        </div>
+      </div>
+      <p style={{ fontFamily:"var(--serif)", fontSize:19, fontWeight:300, color:"var(--muted)", animation:"pulse 2s ease infinite", textAlign:"center" }}>{stages[si]}</p>
+    </div>
+  );
+}
+
+function InductionDNARevealScreen({ dna, onNext }) {
+  const [vis, setVis] = useState(0);
+  const lines = (dna||"").split("\n").filter(l=>l.trim());
+  const parsed = {};
+  for (const ln of lines) { const m=ln.match(/^([A-Z][A-Z\s\/]+):\s*(.+)/); if(m) { const k=m[1].trim().toLowerCase().replace(/[\s\/]+/g,"_"); parsed[k]=m[2].trim(); } }
+  if (parsed.brand_tags) parsed.tags = parsed.brand_tags.split(",").map(t=>t.trim()).filter(Boolean);
+
+  const fields = [
+    { key:"archetype",       label:"Professional Archetype", hero:true },
+    { key:"positioning",     label:"Positioning" },
+    { key:"audience",        label:"Audience" },
+    { key:"tone",            label:"Tone" },
+    { key:"key_message",     label:"Key Message" },
+    { key:"style_direction", label:"Style Direction" },
+  ];
+
+  useEffect(() => {
+    let i=0; const t=setInterval(() => { i++; setVis(i); if(i>=fields.length+2) clearInterval(t); }, 380);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div style={{ minHeight:"100vh", maxWidth:520, margin:"0 auto", padding:"44px 22px 60px", display:"flex", flexDirection:"column" }}>
+      <div style={{ animation:"fadeUp 0.6s ease both", marginBottom:30, display:"flex", alignItems:"flex-start", gap:13 }}>
+        <div style={{ marginTop:3 }}><MirrorMark size={26} /></div>
+        <div>
+          <Cap style={{ marginBottom:7 }}>Brand DNA</Cap>
+          <h2 style={{ fontFamily:"var(--serif)", fontSize:30, fontWeight:400, lineHeight:1.08, marginBottom:9 }}>This is you.</h2>
+          <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>Six conversations. One clear picture. Everything you just articulated, distilled.</p>
+        </div>
+      </div>
+      <div style={{ flex:1 }}>
+        {fields.map((f,i) => (
+          <div key={f.key} style={{ padding:f.hero?"20px 0":"14px 0", borderBottom:"1px solid var(--border)", opacity:vis>i?1:0, transform:vis>i?"none":"translateY(12px)", transition:"opacity 0.5s ease,transform 0.5s ease" }}>
+            <Cap style={{ color:"var(--muted)", marginBottom:f.hero?9:6 }}>{f.label}</Cap>
+            {f.hero
+              ? <p style={{ fontFamily:"var(--serif)", fontSize:24, fontWeight:500, color:"var(--teal)", lineHeight:1.2 }}>{parsed[f.key]||"—"}</p>
+              : <p style={{ fontFamily:"var(--serif)", fontSize:15, fontWeight:400, lineHeight:1.6 }}>{parsed[f.key]||"—"}</p>}
+          </div>
+        ))}
+      </div>
+      {parsed.tags && (
+        <div style={{ marginTop:24, opacity:vis>fields.length?1:0, transform:vis>fields.length?"none":"translateY(10px)", transition:"opacity 0.5s ease,transform 0.5s ease" }}>
+          <Cap style={{ color:"var(--muted)", marginBottom:10 }}>Brand Tags</Cap>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:7 }}>
+            {parsed.tags.map((tag,i) => (
+              <span key={tag} style={{ fontFamily:"var(--sans)", fontSize:9, fontWeight:400, letterSpacing:"0.15em", textTransform:"uppercase", color:"var(--teal)", border:"1px solid rgba(29,158,117,0.3)", padding:"5px 11px", animation:`fadeUp 0.4s ${i*0.07}s ease both`, opacity:0 }}>{tag}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ marginTop:36, opacity:vis>fields.length+1?1:0, transition:"opacity 0.5s ease" }}>
+        <button onClick={onNext} style={{ width:"100%", background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.17em", textTransform:"uppercase", padding:"15px 0", cursor:"pointer" }}>
+          See what to do next →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function InductionNextStepsScreen({ dna, onAction }) {
+  function download() {
+    if (!dna) return;
+    const blob = new Blob([`DFINE — BRAND DNA\n${"═".repeat(36)}\n\n${dna}\n\n${"─".repeat(36)}\nGenerated by Dfine · dfine.app`], { type:"text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href=url; a.download="dfine-brand-dna.txt"; a.click(); URL.revokeObjectURL(url);
+  }
+  const opts = [
+    { l:"A", title:"Download your Brand DNA", sub:"A copy you can reference, share, and build on.", action:"Download", onClick:download, primary:true },
+    { l:"B", title:"Assess your wardrobe",    sub:"Upload items and see how they read against your Brand DNA.", action:"Open Wardrobe", onClick:() => onAction("wardrobe") },
+    { l:"C", title:"Your Brand Dashboard",    sub:"Review and refine your Brand DNA, tone, and positioning.", action:"Open Dashboard", onClick:() => onAction("brand") },
+  ];
+  return (
+    <div style={{ minHeight:"100vh", maxWidth:500, margin:"0 auto", padding:"48px 22px 48px", display:"flex", flexDirection:"column" }}>
+      <div style={{ animation:"fadeUp 0.6s ease both", marginBottom:36 }}>
+        <div style={{ width:46, height:46, borderRadius:"50%", border:"1.5px solid var(--teal)", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:22 }}><MirrorMark size={20} /></div>
+        <Cap style={{ marginBottom:9 }}>You're done</Cap>
+        <h2 style={{ fontFamily:"var(--serif)", fontSize:28, fontWeight:400, lineHeight:1.1, marginBottom:12 }}>Your Brand DNA is ready.</h2>
+        <p style={{ fontSize:14, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>
+          You've done something most professionals never do — given your presence a clear, deliberate definition.
+          Here's where to take it next.
+        </p>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
+        {opts.map((o,i) => (
+          <div key={o.l} onClick={o.onClick}
+            style={{ padding:"18px 18px", background:o.primary?"var(--teal)":"white", boxShadow:o.primary?"0 4px 24px rgba(29,158,117,0.22)":"var(--shadow)", cursor:"pointer", animation:`fadeUp 0.5s ${0.08+i*0.12}s ease both`, opacity:0, transition:"transform 0.18s,box-shadow 0.18s" }}
+            onMouseEnter={e => { e.currentTarget.style.transform="translateY(-2px)"; e.currentTarget.style.boxShadow=o.primary?"0 6px 32px rgba(29,158,117,0.3)":"var(--shadow-md)"; }}
+            onMouseLeave={e => { e.currentTarget.style.transform="none"; e.currentTarget.style.boxShadow=o.primary?"0 4px 24px rgba(29,158,117,0.22)":"var(--shadow)"; }}>
+            <div style={{ display:"flex", alignItems:"flex-start", gap:13 }}>
+              <span style={{ fontFamily:"var(--serif)", fontSize:20, fontWeight:300, color:o.primary?"rgba(255,255,255,0.4)":"var(--teal)", flexShrink:0, paddingTop:1 }}>{o.l}</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <p style={{ fontFamily:"var(--sans)", fontSize:13, fontWeight:500, color:o.primary?"white":"var(--ink)", marginBottom:4 }}>{o.title}</p>
+                <p style={{ fontSize:12, fontWeight:300, lineHeight:1.6, color:o.primary?"rgba(255,255,255,0.68)":"var(--muted)" }}>{o.sub}</p>
+              </div>
+              <span style={{ fontSize:10, letterSpacing:"0.12em", textTransform:"uppercase", color:o.primary?"rgba(255,255,255,0.62)":"var(--teal)", flexShrink:0, paddingTop:3, fontFamily:"var(--sans)" }}>{o.action} →</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InductionFlow({ onComplete }) {
+  const [iScreen, setIScreen] = useState(0);  // 0=process, 1–6=steps, 7=synthesis/reveal, 8=next
+  const [insights, setInsights] = useState({});
+  const [dna,      setDna]      = useState(null);
+  const [synth,    setSynth]    = useState(false);
+
+  const stepIndex   = iScreen >= 1 && iScreen <= 6 ? iScreen - 1 : -1;
+  const currentStep = stepIndex >= 0 ? STEPS[stepIndex] : null;
+
+  function advance() { setIScreen(s => s+1); window.scrollTo({ top:0 }); }
+
+  function handleStepDone(key, insight) {
+    const updated = { ...insights, [key]: insight };
+    setInsights(updated);
+    if (stepIndex < STEPS.length-1) { setIScreen(iScreen+1); window.scrollTo({ top:0 }); }
+    else synthesise(updated);
+  }
+
+  async function synthesise(all) {
+    setSynth(true); setIScreen(7); window.scrollTo({ top:0 });
+    try {
+      const result = await callClaude([{ role:"user", content:"Synthesise my Brand DNA." }], DNA_SYNTHESIS_PROMPT(all), 700);
+      setDna(result.trim());
+    } catch { setDna("Unable to synthesise at this time. Please try again."); }
+    setSynth(false);
+  }
+
+  function handleAction(action) {
+    onComplete({ insights, dna, action });
+  }
+
+  if (iScreen === 0) return <InductionProcessScreen onNext={advance} />;
+  if (currentStep)   return <InductionStepScreen key={currentStep.key} step={currentStep} stepIndex={stepIndex} totalSteps={STEPS.length} onComplete={insight => handleStepDone(currentStep.key, insight)} existingInsight={insights[currentStep.key]||null} />;
+  if (iScreen === 7 && synth) return <InductionSynthesisingScreen />;
+  if (iScreen === 7 && dna)   return <InductionDNARevealScreen dna={dna} onNext={advance} />;
+  if (iScreen === 8) return <InductionNextStepsScreen dna={dna} onAction={handleAction} />;
+  return null;
+}
+
 // ─── HOME ─────────────────────────────────────────────────────────────────────
 function HomeScreen({ setScreen, hasDNA }) {
   const pillars = [
-    { n:"01", t:"The Mirror",    d:"A guided conversation that surfaces who you are and who you're projecting. Often not the same thing." },
-    { n:"02", t:"Your Wardrobe", d:"Every item assessed against your brand. Snap an outfit or add items one by one." },
-    { n:"03", t:"Dress For…",    d:"Describe the moment. We find the look from what you already own." },
-    { n:"04", t:"Over Time",     d:"Your reflection deepens. Drift is noticed. Consistency is recognised." },
+    { n:"01", t:"The Mirror",      d:"A guided conversation that surfaces who you are and who you're projecting. Often not the same thing." },
+    { n:"02", t:"Your Wardrobe",   d:"Every item assessed against your brand. Snap an outfit or add items one by one." },
+    { n:"03", t:"Dress For…",      d:"Describe the moment. We find the look from what you already own." },
+    { n:"04", t:"Change Room",     d:"Considering a purchase? Validate it against your Brand DNA before checkout." },
   ];
   return (
     <div style={{ minHeight:"100vh", paddingTop:56, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"56px 24px 48px" }}>
@@ -421,16 +818,16 @@ function HomeScreen({ setScreen, hasDNA }) {
             </div>
           </div>
         </div>
-        <h1 style={{ fontFamily:"var(--serif)", fontSize:"clamp(42px,8vw,76px)", fontWeight:300, lineHeight:1.04, marginBottom:22, letterSpacing:"-0.01em" }}>
-          Not who you are.<br />
-          <span style={{ color:"var(--teal)", fontStyle:"italic" }}>Show up as yourself.</span>
+        <h1 style={{ fontFamily:"var(--serif)", fontSize:"clamp(32px,7vw,62px)", fontWeight:400, lineHeight:1.08, marginBottom:22, letterSpacing:"-0.01em" }}>
+          What if you were as deliberate about your{" "}
+          <em style={{ color:"var(--teal)" }}>professional packaging</em>{" "}
+          as Apple is about theirs?
         </h1>
         <p style={{ fontSize:15, lineHeight:1.8, color:"var(--muted)", maxWidth:400, margin:"0 auto 44px", fontWeight:300 }}>
-          Other apps ask <em>"does this look good?"</em><br />
-          Dfine asks <em>"does this look like the person I'm becoming?"</em>
+          Dfine makes this simple.
         </p>
         <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
-          <button onClick={() => setScreen(SCREENS.BRAND)}
+          <button onClick={() => setScreen(hasDNA ? SCREENS.BRAND : SCREENS.INDUCTION)}
             onMouseEnter={e => { e.currentTarget.style.background="var(--teal)"; e.currentTarget.style.borderColor="var(--teal)"; }}
             onMouseLeave={e => { e.currentTarget.style.background="var(--ink)"; e.currentTarget.style.borderColor="var(--ink)"; }}
             style={{ background:"var(--ink)", color:"var(--bg)", border:"1.5px solid var(--ink)", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.16em", textTransform:"uppercase", padding:"14px 34px", cursor:"pointer", transition:"all 0.2s" }}>
@@ -442,6 +839,14 @@ function HomeScreen({ setScreen, hasDNA }) {
               onMouseLeave={e => { e.currentTarget.style.borderColor="var(--bstrong)"; e.currentTarget.style.color="var(--ink)"; }}
               style={{ background:"none", color:"var(--ink)", border:"1.5px solid var(--bstrong)", fontFamily:"var(--sans)", fontSize:11, fontWeight:400, letterSpacing:"0.16em", textTransform:"uppercase", padding:"14px 34px", cursor:"pointer", transition:"all 0.2s" }}>
               Your Wardrobe
+            </button>
+          )}
+          {hasDNA && (
+            <button onClick={() => setScreen(SCREENS.CHANGEROOM)}
+              onMouseEnter={e => { e.currentTarget.style.borderColor="var(--teal)"; e.currentTarget.style.color="var(--teal)"; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor="var(--bstrong)"; e.currentTarget.style.color="var(--ink)"; }}
+              style={{ background:"none", color:"var(--ink)", border:"1.5px solid var(--bstrong)", fontFamily:"var(--sans)", fontSize:11, fontWeight:400, letterSpacing:"0.16em", textTransform:"uppercase", padding:"14px 34px", cursor:"pointer", transition:"all 0.2s" }}>
+              Change Room
             </button>
           )}
         </div>
@@ -1378,7 +1783,7 @@ function DressScreen({ wardrobe, brandDNA, setScreen }) {
       const start = new Date(today); start.setHours(0,0,0,0);
       const end   = new Date(today); end.setHours(23,59,59,999);
       const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method:"POST", headers:{"Content-Type":"application/json","x-api-key":import.meta.env.VITE_ANTHROPIC_API_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:1000,
           mcp_servers:[{ type:"url", url:"https://calendarmcp.googleapis.com/mcp/v1", name:"google-calendar" }],
@@ -1845,6 +2250,676 @@ function AboutScreen({ brandDNA }) {
   );
 }
 
+// ─── CHANGE-ROOM VALIDATOR ────────────────────────────────────────────────────
+
+function CountdownBadge({ expiresAt }) {
+  const [label, setLabel] = useState("");
+  useEffect(() => {
+    const update = () => {
+      const diff = expiresAt - Date.now();
+      if (diff <= 0) { setLabel("Expired"); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      setLabel(h > 23 ? `${Math.floor(h/24)}d ${h%24}h` : h > 0 ? `${h}h ${m}m` : `${m}m`);
+    };
+    update();
+    const t = setInterval(update, 30000);
+    return () => clearInterval(t);
+  }, [expiresAt]);
+  const urgent = expiresAt - Date.now() < 3600000 && expiresAt > Date.now();
+  const expired = expiresAt <= Date.now();
+  return (
+    <span style={{ fontSize:9, letterSpacing:"0.1em", textTransform:"uppercase", fontWeight:500,
+      color: expired ? "var(--muted)" : urgent ? "var(--red)" : "var(--amber)" }}>
+      {expired ? "Expired" : `⏱ ${label}`}
+    </span>
+  );
+}
+
+function ConfidenceMeter({ value }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+      <div style={{ flex:1, height:2, background:"var(--border)", borderRadius:2, position:"relative" }}>
+        <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${value}%`, background:"var(--teal)", borderRadius:2, transition:"width 0.8s cubic-bezier(0.34,1.56,0.64,1)" }} />
+      </div>
+      <span style={{ fontSize:11, color:"var(--muted)", fontWeight:400, minWidth:32, textAlign:"right" }}>{value}%</span>
+    </div>
+  );
+}
+
+function ChangeRoomScreen({ brandDNA, considering, setConsidering }) {
+  const [view,      setView]    = useState("intro");    // intro | input | context | verdict | dashboard
+  const [base64,    setBase64]  = useState(null);
+  const [preview,   setPreview] = useState(null);
+  const [crContext, setCrContext] = useState({ retailer:"", occasion:"", urgencyHours:24, price:"", link:"", productName:"" });
+  const [result,    setResult]  = useState(null);
+  const [loading,   setLoading] = useState(false);
+  const [dragOver,  setDragOver] = useState(false);
+  const [dashFilter, setDashFilter] = useState("all");
+  const [copied,    setCopied]  = useState(false);
+  const fileRef = useRef();
+
+  const OCCASIONS = [
+    "Everyday office", "Client meeting", "Board presentation", "Networking event",
+    "Team leadership", "Conference / speaking", "Business casual social", "Other"
+  ];
+
+  function compressImage(file) {
+    return new Promise(resolve => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX = 1024;
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) { if (w > h) { h = h*(MAX/w); w = MAX; } else { w = w*(MAX/h); h = MAX; } }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", 0.82).split(",")[1]);
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleFile(file) {
+    setPreview(URL.createObjectURL(file));
+    const b64 = await compressImage(file);
+    setBase64(b64);
+  }
+
+  async function runAssessment() {
+    if (!base64) return;
+    setLoading(true);
+    setView("verdict");
+    try {
+      const system = buildChangeRoomSystem(brandDNA, crContext);
+      const raw = await callClaude(
+        [{ role:"user", content: crContext.productName
+            ? `Please assess this item: ${crContext.productName}. ${crContext.occasion ? `I'd wear it for: ${crContext.occasion}.` : ""}`
+            : `Please assess this item for me.${crContext.occasion ? ` I'd wear it for: ${crContext.occasion}.` : ""}` }],
+        system, base64, 900
+      );
+      const parsed = parseJSON(raw);
+      if (parsed) setResult(parsed);
+      else setResult({ verdict:"◈ Buy with Caveats", verdictLabel:"On Brand with Caveats", confidence:60, itemDescription:"Item analysed", rationale: raw, actionableGuidance:"", occasionFit:"", gapAnalysis:"", brandTags:[], signals:{socialCategory:5,cognitiveState:5,status:5,aestheticCoherence:5} });
+    } catch(e) { console.error(e); }
+    setLoading(false);
+  }
+
+  function saveToConsidering(status = "pending") {
+    if (!result) return;
+    const item = {
+      id: `cr_${Date.now()}`,
+      addedAt: Date.now(),
+      expiresAt: Date.now() + (crContext.urgencyHours * 3600000),
+      status,
+      imagePreview: preview,
+      verdict: result.verdict,
+      verdictLabel: result.verdictLabel,
+      confidence: result.confidence,
+      itemDescription: result.itemDescription,
+      brandTags: result.brandTags || [],
+      signals: result.signals,
+      rationale: result.rationale,
+      actionableGuidance: result.actionableGuidance,
+      occasionFit: result.occasionFit,
+      gapAnalysis: result.gapAnalysis,
+      retailer: crContext.retailer,
+      occasion: crContext.occasion,
+      price: crContext.price,
+      link: crContext.link,
+      productName: crContext.productName || result.itemDescription,
+    };
+    setConsidering(prev => [item, ...prev]);
+    return item;
+  }
+
+  function resetFlow() {
+    setView("intro");
+    setBase64(null);
+    setPreview(null);
+    setCrContext({ retailer:"", occasion:"", urgencyHours:24, price:"", link:"", productName:"" });
+    setResult(null);
+    setLoading(false);
+  }
+
+  function updateItemStatus(id, status) {
+    setConsidering(prev => prev.map(i => i.id === id ? { ...i, status } : i));
+  }
+
+  // ─ Analytics
+  const total = considering.length;
+  const approved = considering.filter(i => i.status === "purchased" || (i.verdict?.includes("Buy It") && i.status !== "rejected")).length;
+  const purchased = considering.filter(i => i.status === "purchased").length;
+  const approvalRate = total > 0 ? Math.round((considering.filter(i => i.verdict?.includes("Buy It")).length / total) * 100) : 0;
+  const purchaseRate = total > 0 ? Math.round((purchased / total) * 100) : 0;
+
+  const filtered = considering.filter(i => {
+    if (dashFilter === "all") return true;
+    if (dashFilter === "pending") return i.status === "pending" && i.expiresAt > Date.now();
+    if (dashFilter === "approved") return i.verdict?.includes("Buy It") && i.status === "pending";
+    if (dashFilter === "rejected") return i.status === "rejected";
+    if (dashFilter === "purchased") return i.status === "purchased";
+    if (dashFilter === "expired") return i.expiresAt <= Date.now() && i.status === "pending";
+    return true;
+  });
+
+  const inputStyle = { width:"100%", padding:"11px 14px", background:"white", border:"1px solid var(--border)", borderRadius:0, fontFamily:"var(--sans)", fontSize:13, fontWeight:300, color:"var(--ink)", outline:"none" };
+  const labelStyle = { fontSize:10, letterSpacing:"0.16em", textTransform:"uppercase", color:"var(--muted)", fontWeight:400, display:"block", marginBottom:6 };
+
+  // ─────────────────────────────────────────────
+  // INTRO
+  // ─────────────────────────────────────────────
+  if (view === "intro") return (
+    <div style={{ minHeight:"100vh", paddingTop:56 }}>
+      <div style={{ padding:"16px 24px 0", borderBottom:"1px solid var(--border)" }}>
+        <div style={{ maxWidth:720, margin:"0 auto", paddingBottom:16, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
+          <div>
+            <Cap style={{ marginBottom:5 }}>Change Room</Cap>
+            <h2 style={{ fontFamily:"var(--serif)", fontSize:24, fontWeight:300 }}>Validate before you buy.</h2>
+          </div>
+          {considering.length > 0 && (
+            <button onClick={() => setView("dashboard")}
+              style={{ background:"none", border:"1px solid var(--border)", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", padding:"8px 16px", cursor:"pointer" }}>
+              Considering ({considering.length})
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{ maxWidth:720, margin:"0 auto", padding:"40px 24px" }}>
+
+        {/* Hero entry card */}
+        <div style={{ background:"var(--ink)", padding:"40px 36px", marginBottom:24, animation:"fadeUp 0.5s ease both", position:"relative", overflow:"hidden" }}>
+          <div style={{ position:"absolute", top:-40, right:-40, width:180, height:180, borderRadius:"50%", border:"1px solid rgba(255,255,255,0.05)" }} />
+          <div style={{ position:"absolute", top:-20, right:-20, width:120, height:120, borderRadius:"50%", border:"1px solid rgba(29,158,117,0.15)" }} />
+          <Cap style={{ color:"var(--teal-lt)", marginBottom:14 }}>New session</Cap>
+          <h3 style={{ fontFamily:"var(--serif)", fontSize:"clamp(22px,4vw,30px)", fontWeight:300, color:"white", lineHeight:1.2, marginBottom:14 }}>
+            Try pieces risk-free<br/>in our change room.
+          </h3>
+          <p style={{ fontSize:13, color:"rgba(255,255,255,0.55)", lineHeight:1.8, fontWeight:300, marginBottom:32, maxWidth:420 }}>
+            See how a prospective purchase aligns with your Brand DNA before you commit.
+            We remember what you considered, approved, and rejected.
+          </p>
+          <button onClick={() => setView("input")}
+            style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.17em", textTransform:"uppercase", padding:"14px 32px", cursor:"pointer", transition:"opacity 0.18s" }}
+            onMouseEnter={e => e.target.style.opacity = "0.88"}
+            onMouseLeave={e => e.target.style.opacity = "1"}>
+            Validate a Purchase →
+          </button>
+        </div>
+
+        {/* How it works */}
+        <div style={{ marginBottom:32, animation:"fadeUp 0.5s 0.1s ease both", opacity:0 }}>
+          <Cap style={{ marginBottom:16, color:"var(--muted)" }}>How it works</Cap>
+          {[
+            { num:"01", label:"Photograph or describe the item", sub:"From a store, online listing, or barcode scan." },
+            { num:"02", label:"Set your context", sub:"Tell us the occasion and how urgently you need to decide." },
+            { num:"03", label:"Get a real-time verdict", sub:"On Brand DNA alignment, occasion fit, and whether to buy." },
+            { num:"04", label:"Save to your Considering list", sub:"48-hour window to decide — we track what you considered and what you chose." },
+          ].map((s, i) => (
+            <div key={i} style={{ display:"flex", gap:18, padding:"14px 0", borderBottom: i < 3 ? "1px solid var(--border)" : "none" }}>
+              <span style={{ fontFamily:"var(--serif)", fontSize:14, color:"var(--teal-lt)", fontWeight:300, minWidth:22, paddingTop:1 }}>{s.num}</span>
+              <div>
+                <p style={{ fontSize:13, fontWeight:400, color:"var(--ink)", marginBottom:2 }}>{s.label}</p>
+                <p style={{ fontSize:12, color:"var(--muted)", fontWeight:300 }}>{s.sub}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Dashboard shortcut if items exist */}
+        {considering.length > 0 && (
+          <div style={{ animation:"fadeUp 0.5s 0.2s ease both", opacity:0 }}>
+            <button onClick={() => setView("dashboard")}
+              style={{ width:"100%", background:"var(--surface)", border:"1px solid var(--border)", color:"var(--ink)", fontFamily:"var(--sans)", fontSize:11, fontWeight:400, letterSpacing:"0.14em", textTransform:"uppercase", padding:"14px", cursor:"pointer", textAlign:"left", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span>Items You're Considering</span>
+              <span style={{ color:"var(--teal)", fontWeight:500 }}>{considering.length} item{considering.length!==1?"s":""} →</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ─────────────────────────────────────────────
+  // INPUT
+  // ─────────────────────────────────────────────
+  if (view === "input") return (
+    <div style={{ minHeight:"100vh", paddingTop:56 }}>
+      <div style={{ padding:"16px 24px 0", borderBottom:"1px solid var(--border)" }}>
+        <div style={{ maxWidth:640, margin:"0 auto", paddingBottom:16, display:"flex", alignItems:"center", gap:16 }}>
+          <button onClick={() => setView("intro")} style={{ background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:18, padding:0, lineHeight:1 }}>←</button>
+          <div>
+            <Cap style={{ marginBottom:2 }}>Step 1 of 2</Cap>
+            <h2 style={{ fontFamily:"var(--serif)", fontSize:22, fontWeight:300 }}>Show us the item.</h2>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"32px 24px" }}>
+
+        {/* Photo upload zone */}
+        <div style={{ marginBottom:28 }}>
+          <label style={labelStyle}>Upload a photo</label>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }}
+            onChange={e => { if (e.target.files[0]) { handleFile(e.target.files[0]); } e.target.value=""; }} />
+
+          <div onClick={() => !preview && fileRef.current?.click()}
+            onDrop={e => { e.preventDefault(); setDragOver(false); if (!preview && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]); }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            style={{ border:`1.5px dashed ${dragOver ? "var(--teal)" : preview ? "var(--teal)" : "var(--bstrong)"}`, minHeight:260, display:"flex", alignItems:"center", justifyContent:"center", background:dragOver ? "var(--teal-bg)" : "white", overflow:"hidden", transition:"all 0.2s", position:"relative", cursor:preview?"default":"pointer" }}>
+            {preview ? (
+              <>
+                <img src={preview} alt="" style={{ maxHeight:280, maxWidth:"100%", objectFit:"contain" }} />
+                <button onClick={e => { e.stopPropagation(); setPreview(null); setBase64(null); }}
+                  style={{ position:"absolute", top:10, right:10, background:"var(--ink)", border:"none", color:"white", width:28, height:28, borderRadius:"50%", cursor:"pointer", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
+              </>
+            ) : (
+              <div style={{ textAlign:"center", padding:36 }}>
+                <div style={{ width:52, height:52, borderRadius:"50%", border:"1.5px solid var(--bstrong)", margin:"0 auto 16px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+                  <div style={{ width:18, height:18, borderRadius:"50%", border:"1.5px solid var(--teal-lt)" }} />
+                </div>
+                <p style={{ fontFamily:"var(--serif)", fontSize:18, marginBottom:6, fontWeight:300 }}>Photo of the item</p>
+                <p style={{ fontSize:12, color:"var(--muted)", fontWeight:300, lineHeight:1.7 }}>From your camera, a screenshot,<br />or an online listing image.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:28 }}>
+          <div style={{ flex:1, height:1, background:"var(--border)" }} />
+          <span style={{ fontSize:10, color:"var(--muted)", letterSpacing:"0.14em", textTransform:"uppercase" }}>or describe it</span>
+          <div style={{ flex:1, height:1, background:"var(--border)" }} />
+        </div>
+
+        {/* Text description */}
+        <div style={{ marginBottom:28 }}>
+          <label style={labelStyle}>Product name or description</label>
+          <input style={inputStyle} placeholder="e.g. Navy wool blazer, single-button, slim cut — ZARA"
+            value={crContext.productName}
+            onChange={e => setCrContext(c => ({ ...c, productName:e.target.value }))} />
+          <p style={{ fontSize:11, color:"var(--muted)", marginTop:6, fontWeight:300 }}>If you have a photo, the visual read will be sharper. Text alone also works.</p>
+        </div>
+
+        {/* Retail integration hooks */}
+        <div style={{ display:"flex", gap:10, marginBottom:36 }}>
+          {[
+            { label:"Paste a product URL", icon:"🔗", note:"Shopify, retailer link" },
+            { label:"Scan barcode", icon:"⠿", note:"In-store scanning" },
+          ].map((h, i) => (
+            <div key={i} style={{ flex:1, padding:"14px 16px", background:"var(--surface)", border:"1px solid var(--border)", opacity:0.6 }}>
+              <p style={{ fontSize:16, marginBottom:4 }}>{h.icon}</p>
+              <p style={{ fontSize:11, fontWeight:500, marginBottom:2, color:"var(--ink)" }}>{h.label}</p>
+              <p style={{ fontSize:10, color:"var(--muted)", fontWeight:300 }}>{h.note} · Coming soon</p>
+            </div>
+          ))}
+        </div>
+
+        <button onClick={() => setView("context")}
+          disabled={!base64 && !crContext.productName.trim()}
+          style={{ width:"100%", background:(!base64 && !crContext.productName.trim()) ? "var(--border)" : "var(--ink)", color:(!base64 && !crContext.productName.trim()) ? "var(--muted)" : "var(--bg)", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.17em", textTransform:"uppercase", padding:"15px", cursor:(!base64 && !crContext.productName.trim()) ? "default" : "pointer", transition:"all 0.18s" }}>
+          Continue →
+        </button>
+      </div>
+    </div>
+  );
+
+  // ─────────────────────────────────────────────
+  // CONTEXT
+  // ─────────────────────────────────────────────
+  if (view === "context") return (
+    <div style={{ minHeight:"100vh", paddingTop:56 }}>
+      <div style={{ padding:"16px 24px 0", borderBottom:"1px solid var(--border)" }}>
+        <div style={{ maxWidth:640, margin:"0 auto", paddingBottom:16, display:"flex", alignItems:"center", gap:16 }}>
+          <button onClick={() => setView("input")} style={{ background:"none", border:"none", color:"var(--muted)", cursor:"pointer", fontSize:18, padding:0, lineHeight:1 }}>←</button>
+          <div>
+            <Cap style={{ marginBottom:2 }}>Step 2 of 2</Cap>
+            <h2 style={{ fontFamily:"var(--serif)", fontSize:22, fontWeight:300 }}>Set your context.</h2>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"32px 24px" }}>
+
+        {/* Preview thumbnail */}
+        {preview && (
+          <div style={{ marginBottom:24, display:"flex", alignItems:"center", gap:16, padding:"14px 18px", background:"white", boxShadow:"var(--shadow)", borderLeft:"3px solid var(--teal)" }}>
+            <img src={preview} alt="" style={{ width:56, height:56, objectFit:"cover", flexShrink:0 }} />
+            <div>
+              <Cap style={{ marginBottom:2, fontSize:9 }}>Item ready</Cap>
+              <p style={{ fontSize:13, fontWeight:300, color:"var(--muted)" }}>{crContext.productName || "Photo uploaded"}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Occasion */}
+        <div style={{ marginBottom:24 }}>
+          <label style={labelStyle}>What's the occasion you'd wear this for?</label>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+            {OCCASIONS.map(o => (
+              <button key={o} onClick={() => setCrContext(c => ({ ...c, occasion: c.occasion === o ? "" : o }))}
+                style={{ background:crContext.occasion===o ? "var(--ink)" : "white", color:crContext.occasion===o ? "var(--bg)" : "var(--muted)", border:`1px solid ${crContext.occasion===o ? "var(--ink)" : "var(--border)"}`, fontFamily:"var(--sans)", fontSize:11, fontWeight:300, letterSpacing:"0.08em", padding:"8px 14px", cursor:"pointer", transition:"all 0.15s" }}>
+                {o}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Retailer */}
+        <div style={{ marginBottom:24 }}>
+          <label style={labelStyle}>Where are you considering buying this? (optional)</label>
+          <input style={inputStyle} placeholder="e.g. ZARA, Uniqlo, Mr Porter, David Jones…"
+            value={crContext.retailer}
+            onChange={e => setCrContext(c => ({ ...c, retailer:e.target.value }))} />
+        </div>
+
+        {/* Price */}
+        <div style={{ marginBottom:24 }}>
+          <label style={labelStyle}>Price (optional)</label>
+          <input style={{ ...inputStyle, maxWidth:200 }} placeholder="e.g. $189"
+            value={crContext.price}
+            onChange={e => setCrContext(c => ({ ...c, price:e.target.value }))} />
+        </div>
+
+        {/* Decision window */}
+        <div style={{ marginBottom:36 }}>
+          <label style={labelStyle}>How long do you have to decide?</label>
+          <div style={{ display:"flex", gap:8 }}>
+            {[{ h:1, label:"1 hour" }, { h:6, label:"6 hours" }, { h:24, label:"24 hours" }, { h:48, label:"48 hours" }].map(({ h, label }) => (
+              <button key={h} onClick={() => setCrContext(c => ({ ...c, urgencyHours:h }))}
+                style={{ flex:1, background:crContext.urgencyHours===h ? "var(--ink)" : "white", color:crContext.urgencyHours===h ? "var(--bg)" : "var(--muted)", border:`1px solid ${crContext.urgencyHours===h ? "var(--ink)" : "var(--border)"}`, fontFamily:"var(--sans)", fontSize:11, fontWeight:300, padding:"9px 0", cursor:"pointer", transition:"all 0.15s", textAlign:"center" }}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize:11, color:"var(--muted)", marginTop:8, fontWeight:300 }}>After this window, the item moves to Expired. You can always extend it.</p>
+        </div>
+
+        <button onClick={runAssessment}
+          style={{ width:"100%", background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.17em", textTransform:"uppercase", padding:"15px", cursor:"pointer" }}>
+          Get My Verdict →
+        </button>
+      </div>
+    </div>
+  );
+
+  // ─────────────────────────────────────────────
+  // VERDICT
+  // ─────────────────────────────────────────────
+  if (view === "verdict") return (
+    <div style={{ minHeight:"100vh", paddingTop:56 }}>
+      <div style={{ padding:"16px 24px 0", borderBottom:"1px solid var(--border)" }}>
+        <div style={{ maxWidth:640, margin:"0 auto", paddingBottom:16 }}>
+          <Cap style={{ marginBottom:5 }}>Change Room</Cap>
+          <h2 style={{ fontFamily:"var(--serif)", fontSize:22, fontWeight:300 }}>
+            {loading ? "Reading the signals…" : "Your verdict."}
+          </h2>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"32px 24px" }}>
+
+        {loading && (
+          <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", paddingTop:80, gap:24, animation:"fadeIn 0.3s ease both" }}>
+            {preview && <img src={preview} alt="" style={{ width:120, height:120, objectFit:"cover", opacity:0.6 }} />}
+            <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+              <Spinner size={18} />
+              <p style={{ fontSize:13, color:"var(--muted)", fontStyle:"italic", fontWeight:300 }}>Assessing against your Brand DNA…</p>
+            </div>
+            <div style={{ width:"100%", maxWidth:320, height:1, background:"var(--border)", position:"relative", overflow:"hidden" }}>
+              <div style={{ position:"absolute", inset:0, background:"linear-gradient(90deg, transparent, var(--teal), transparent)", animation:"scanline 1.8s linear infinite" }} />
+            </div>
+          </div>
+        )}
+
+        {!loading && result && (
+          <div style={{ animation:"fadeUp 0.5s ease both" }}>
+
+            {/* Verdict hero */}
+            <div style={{ background:crVerdictBg(result.verdict), border:`1.5px solid ${crVerdictColor(result.verdict)}22`, padding:"28px 28px", marginBottom:16, position:"relative", overflow:"hidden" }}>
+              {preview && (
+                <div style={{ position:"absolute", right:20, top:20, width:72, height:72, overflow:"hidden", opacity:0.9 }}>
+                  <img src={preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                </div>
+              )}
+              <Cap style={{ marginBottom:8, color:crVerdictColor(result.verdict) }}>Verdict</Cap>
+              <p style={{ fontFamily:"var(--serif)", fontSize:"clamp(22px,4vw,30px)", fontWeight:300, color:crVerdictColor(result.verdict), marginBottom:4, lineHeight:1.1 }}>
+                {result.verdict}
+              </p>
+              <p style={{ fontSize:12, color:"var(--muted)", fontWeight:300, marginBottom:16 }}>{result.verdictLabel}</p>
+              <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:result.brandTags?.length ? 14 : 0 }}>
+                <span style={{ fontSize:10, color:"var(--muted)", letterSpacing:"0.1em", textTransform:"uppercase" }}>Confidence</span>
+                <div style={{ flex:1, maxWidth:200 }}><ConfidenceMeter value={result.confidence || 0} /></div>
+              </div>
+              {result.brandTags?.length > 0 && (
+                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                  {result.brandTags.map((t,i) => <span key={i} style={{ fontSize:10, color:crVerdictColor(result.verdict), border:`1px solid ${crVerdictColor(result.verdict)}33`, padding:"2px 10px", letterSpacing:"0.1em", fontWeight:500 }}>{t}</span>)}
+                </div>
+              )}
+            </div>
+
+            {/* Item description */}
+            {result.itemDescription && (
+              <p style={{ fontSize:12, color:"var(--muted)", fontStyle:"italic", fontWeight:300, marginBottom:16, paddingLeft:4 }}>{result.itemDescription}</p>
+            )}
+
+            {/* Signal bars */}
+            {result.signals && (
+              <div style={{ marginBottom:16 }}>
+                <SignalRadar signals={result.signals} />
+              </div>
+            )}
+
+            {/* Rationale */}
+            {result.rationale && (
+              <div style={{ padding:"20px 22px", background:"white", boxShadow:"var(--shadow)", marginBottom:10 }}>
+                <Cap style={{ marginBottom:10, color:"var(--muted)" }}>What I see</Cap>
+                <p style={{ fontSize:13, lineHeight:1.85, fontWeight:300, color:"var(--ink)" }}>{result.rationale}</p>
+              </div>
+            )}
+
+            {/* Actionable guidance */}
+            {result.actionableGuidance && (
+              <div style={{ padding:"20px 22px", background:"white", boxShadow:"var(--shadow)", borderLeft:`3px solid ${crVerdictColor(result.verdict)}`, marginBottom:10 }}>
+                <Cap style={{ marginBottom:10, color:crVerdictColor(result.verdict) }}>My recommendation</Cap>
+                <p style={{ fontSize:13, lineHeight:1.85, fontWeight:400, color:"var(--ink)" }}>{result.actionableGuidance}</p>
+              </div>
+            )}
+
+            {/* Occasion fit + gap analysis */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:24 }}>
+              {result.occasionFit && (
+                <div style={{ padding:"16px 18px", background:"var(--surface)", border:"1px solid var(--border)" }}>
+                  <Cap style={{ marginBottom:6, fontSize:9, color:"var(--muted)" }}>Occasion fit</Cap>
+                  <p style={{ fontSize:12, lineHeight:1.7, fontWeight:300, color:"var(--ink)" }}>{result.occasionFit}</p>
+                </div>
+              )}
+              {result.gapAnalysis && (
+                <div style={{ padding:"16px 18px", background:"var(--surface)", border:"1px solid var(--border)" }}>
+                  <Cap style={{ marginBottom:6, fontSize:9, color:"var(--muted)" }}>Wardrobe gap</Cap>
+                  <p style={{ fontSize:12, lineHeight:1.7, fontWeight:300, color:"var(--ink)" }}>{result.gapAnalysis}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Decision buttons */}
+            <div style={{ padding:"22px 24px", background:"var(--ink)", marginBottom:24 }}>
+              <Cap style={{ color:"rgba(255,255,255,0.4)", marginBottom:14 }}>Your decision</Cap>
+              <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+                <button onClick={() => { saveToConsidering("purchased"); setView("dashboard"); }}
+                  style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.15em", textTransform:"uppercase", padding:"14px", cursor:"pointer" }}>
+                  ✓ I'm Buying It
+                </button>
+                <button onClick={() => { saveToConsidering("pending"); setView("dashboard"); }}
+                  style={{ background:"rgba(255,255,255,0.08)", color:"rgba(255,255,255,0.8)", border:"1px solid rgba(255,255,255,0.12)", fontFamily:"var(--sans)", fontSize:11, fontWeight:400, letterSpacing:"0.15em", textTransform:"uppercase", padding:"13px", cursor:"pointer" }}>
+                  ⏱ Save to Considering ({crContext.urgencyHours}h window)
+                </button>
+                <button onClick={() => { saveToConsidering("rejected"); resetFlow(); }}
+                  style={{ background:"none", color:"rgba(255,255,255,0.4)", border:"1px solid rgba(255,255,255,0.08)", fontFamily:"var(--sans)", fontSize:11, fontWeight:300, letterSpacing:"0.15em", textTransform:"uppercase", padding:"12px", cursor:"pointer" }}>
+                  ✕ Pass on This
+                </button>
+              </div>
+            </div>
+
+            <button onClick={resetFlow}
+              style={{ background:"none", border:"none", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:11, letterSpacing:"0.12em", textTransform:"uppercase", cursor:"pointer" }}>
+              ← Assess another item
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ─────────────────────────────────────────────
+  // DASHBOARD
+  // ─────────────────────────────────────────────
+  if (view === "dashboard") return (
+    <div style={{ minHeight:"100vh", paddingTop:56 }}>
+      <div style={{ padding:"16px 24px 0", borderBottom:"1px solid var(--border)" }}>
+        <div style={{ maxWidth:760, margin:"0 auto", paddingBottom:16, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
+          <div>
+            <Cap style={{ marginBottom:5 }}>Change Room</Cap>
+            <h2 style={{ fontFamily:"var(--serif)", fontSize:24, fontWeight:300 }}>Items You're Considering</h2>
+          </div>
+          <button onClick={() => setView("input")}
+            style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.15em", textTransform:"uppercase", padding:"10px 20px", cursor:"pointer", whiteSpace:"nowrap" }}>
+            + Validate Item
+          </button>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:760, margin:"0 auto", padding:"28px 24px" }}>
+
+        {/* Analytics strip */}
+        {total > 0 && (
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:28, animation:"fadeUp 0.4s ease both" }}>
+            {[
+              { label:"Total Considered", value:total, suffix:"" },
+              { label:"On-Brand Rate", value:approvalRate, suffix:"%" },
+              { label:"Purchase Rate", value:purchaseRate, suffix:"%" },
+            ].map((s, i) => (
+              <div key={i} style={{ padding:"18px 20px", background:"white", boxShadow:"var(--shadow)", textAlign:"center" }}>
+                <p style={{ fontFamily:"var(--serif)", fontSize:28, fontWeight:300, color:"var(--ink)", lineHeight:1 }}>{s.value}{s.suffix}</p>
+                <Cap style={{ color:"var(--muted)", marginTop:6, fontSize:9 }}>{s.label}</Cap>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Filter tabs */}
+        <div style={{ display:"flex", gap:0, marginBottom:24, borderBottom:"1px solid var(--border)", overflowX:"auto" }}>
+          {[
+            { key:"all", label:"All" },
+            { key:"pending", label:"Pending" },
+            { key:"approved", label:"On Brand" },
+            { key:"purchased", label:"Purchased" },
+            { key:"rejected", label:"Rejected" },
+            { key:"expired", label:"Expired" },
+          ].map(f => (
+            <button key={f.key} onClick={() => setDashFilter(f.key)}
+              style={{ background:"none", border:"none", borderBottom:`2px solid ${dashFilter===f.key ? "var(--ink)" : "transparent"}`, color:dashFilter===f.key ? "var(--ink)" : "var(--muted)", fontFamily:"var(--sans)", fontSize:11, fontWeight:dashFilter===f.key?500:300, letterSpacing:"0.1em", textTransform:"uppercase", padding:"10px 14px", cursor:"pointer", whiteSpace:"nowrap", transition:"all 0.15s" }}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Item cards */}
+        {filtered.length === 0 ? (
+          <div style={{ textAlign:"center", padding:"80px 24px", animation:"fadeUp 0.4s ease both" }}>
+            <p style={{ fontFamily:"var(--serif)", fontSize:20, fontWeight:300, marginBottom:10 }}>
+              {considering.length === 0 ? "Nothing here yet." : "No items match this filter."}
+            </p>
+            <p style={{ fontSize:13, color:"var(--muted)", fontWeight:300, marginBottom:28 }}>
+              {considering.length === 0 ? "Validate your first prospective purchase and it'll appear here." : "Try a different filter."}
+            </p>
+            {considering.length === 0 && (
+              <button onClick={() => setView("input")}
+                style={{ background:"var(--ink)", color:"var(--bg)", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.15em", textTransform:"uppercase", padding:"13px 28px", cursor:"pointer" }}>
+                Validate a Purchase →
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            {filtered.map((item, i) => {
+              const expired = item.expiresAt <= Date.now() && item.status === "pending";
+              return (
+                <div key={item.id}
+                  style={{ background:"white", boxShadow:"var(--shadow)", borderLeft:`3px solid ${item.status==="purchased"?"var(--teal)":item.status==="rejected"?"var(--red)":crVerdictColor(item.verdict)}`, display:"flex", gap:0, animation:`fadeUp 0.35s ease ${i*0.05}s both`, opacity:item.status==="rejected"||expired?0.6:1, transition:"opacity 0.2s" }}>
+                  {/* Image */}
+                  {item.imagePreview && (
+                    <div style={{ width:76, flexShrink:0, overflow:"hidden" }}>
+                      <img src={item.imagePreview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                    </div>
+                  )}
+                  {/* Content */}
+                  <div style={{ flex:1, padding:"16px 20px", minWidth:0 }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6, gap:10 }}>
+                      <p style={{ fontSize:13, fontWeight:400, color:"var(--ink)", lineHeight:1.4 }}>{item.productName}</p>
+                      <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, flexShrink:0 }}>
+                        <span style={{ fontSize:10, color:item.status==="purchased"?"var(--green)":item.status==="rejected"?"var(--red)":crVerdictColor(item.verdict), fontWeight:500, whiteSpace:"nowrap" }}>
+                          {item.status==="purchased" ? "✓ Purchased" : item.status==="rejected" ? "✕ Rejected" : item.verdict}
+                        </span>
+                        {item.status==="pending" && <CountdownBadge expiresAt={item.expiresAt} />}
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:12, alignItems:"center", flexWrap:"wrap" }}>
+                      {item.retailer && <span style={{ fontSize:11, color:"var(--muted)", fontWeight:300 }}>{item.retailer}</span>}
+                      {item.price && <span style={{ fontSize:11, color:"var(--muted)", fontWeight:300 }}>·  {item.price}</span>}
+                      {item.occasion && <span style={{ fontSize:11, color:"var(--muted)", fontWeight:300 }}>·  {item.occasion}</span>}
+                    </div>
+                    {item.brandTags?.length > 0 && (
+                      <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginTop:8 }}>
+                        {item.brandTags.slice(0,3).map((t,j) => <span key={j} style={{ fontSize:9, color:"var(--teal)", border:"1px solid rgba(29,158,117,0.2)", padding:"1px 8px", letterSpacing:"0.08em" }}>{t}</span>)}
+                      </div>
+                    )}
+                    {/* Actions */}
+                    {item.status === "pending" && (
+                      <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                        <button onClick={() => updateItemStatus(item.id, "purchased")}
+                          style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:9, fontWeight:500, letterSpacing:"0.12em", textTransform:"uppercase", padding:"6px 14px", cursor:"pointer" }}>
+                          Bought It
+                        </button>
+                        <button onClick={() => updateItemStatus(item.id, "rejected")}
+                          style={{ background:"none", color:"var(--muted)", border:"1px solid var(--border)", fontFamily:"var(--sans)", fontSize:9, fontWeight:400, letterSpacing:"0.12em", textTransform:"uppercase", padding:"6px 12px", cursor:"pointer" }}>
+                          Pass
+                        </button>
+                        {expired && (
+                          <button onClick={() => setConsidering(prev => prev.map(c => c.id===item.id ? { ...c, expiresAt:Date.now()+(24*3600000) } : c))}
+                            style={{ background:"none", color:"var(--amber)", border:"1px solid rgba(176,106,32,0.2)", fontFamily:"var(--sans)", fontSize:9, fontWeight:400, letterSpacing:"0.12em", textTransform:"uppercase", padding:"6px 12px", cursor:"pointer" }}>
+                            Extend 24h
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Back to intro */}
+        <div style={{ marginTop:32, paddingTop:20, borderTop:"1px solid var(--border)" }}>
+          <button onClick={() => setView("intro")}
+            style={{ background:"none", border:"none", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:11, letterSpacing:"0.12em", textTransform:"uppercase", cursor:"pointer" }}>
+            ← Back to Change Room
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [screen, setScreen]             = useState(SCREENS.HOME);
@@ -1852,25 +2927,28 @@ export default function App() {
   const [stepMessages, setStepMessages] = useState({});
   const [brandDNA, setBrandDNA]         = useState("");
   const [wardrobe, setWardrobe]         = useState([]);
+  const [considering, setConsidering]   = useState([]);
   const [signature, setSignature]       = useState({});
   const [hydrated, setHydrated]         = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [dna, insights, msgs, wrd, sig, seen] = await Promise.all([
+      const [dna, insights, msgs, wrd, sig, seen, cons] = await Promise.all([
         sGet("dfine:brandDNA"),
         sGet("dfine:stepInsights"),
         sGet("dfine:stepMessages"),
         sGet("dfine:wardrobe"),
         sGet("dfine:signature"),
         sGet("dfine:onboardingSeen"),
+        sGet("dfine:considering"),
       ]);
       if (dna)      setBrandDNA(dna);
       if (insights) setStepInsights(insights);
       if (msgs)     setStepMessages(msgs);
       if (wrd)      setWardrobe(wrd);
       if (sig)      setSignature(sig);
+      if (cons)     setConsidering(cons);
       const hasProgress = (insights && Object.keys(insights).length > 0) || !!dna;
       if (!seen || !hasProgress) setShowOnboarding(true);
       setHydrated(true);
@@ -1882,11 +2960,12 @@ export default function App() {
   useEffect(() => { if (hydrated) sSet("dfine:stepMessages", stepMessages); }, [stepMessages, hydrated]);
   useEffect(() => { if (hydrated) sSet("dfine:wardrobe",     wardrobe);     }, [wardrobe, hydrated]);
   useEffect(() => { if (hydrated) sSet("dfine:signature",    signature);    }, [signature, hydrated]);
+  useEffect(() => { if (hydrated) sSet("dfine:considering",  considering);  }, [considering, hydrated]);
 
   const completeOnboarding = () => {
     sSet("dfine:onboardingSeen", true);
     setShowOnboarding(false);
-    setScreen(SCREENS.BRAND);
+    setScreen(SCREENS.INDUCTION);
   };
 
   if (!hydrated) return (
@@ -1911,13 +2990,19 @@ export default function App() {
   return (
     <>
       <GlobalStyles />
-      <Nav screen={screen} setScreen={setScreen} wardrobeCount={wardrobe.length} hasDNA={!!brandDNA} onShowOnboarding={() => setShowOnboarding(true)} />
-      {screen===SCREENS.HOME      && <HomeScreen setScreen={setScreen} hasDNA={!!brandDNA} />}
-      {screen===SCREENS.BRAND     && <BrandScreen stepInsights={stepInsights} setStepInsights={setStepInsights} stepMessages={stepMessages} setStepMessages={setStepMessages} brandDNA={brandDNA} setBrandDNA={setBrandDNA} />}
-      {screen===SCREENS.SIGNATURE && <SignatureScreen brandDNA={brandDNA} signature={signature} setSignature={setSignature} setScreen={setScreen} />}
-      {screen===SCREENS.ABOUT     && <AboutScreen brandDNA={brandDNA} />}
-      {screen===SCREENS.WARDROBE  && <WardrobeScreen wardrobe={wardrobe} setWardrobe={setWardrobe} brandDNA={brandDNA} />}
-      {screen===SCREENS.DRESS     && <DressScreen wardrobe={wardrobe} brandDNA={brandDNA} setScreen={setScreen} />}
+      <Nav screen={screen} setScreen={setScreen} wardrobeCount={wardrobe.length} consideringCount={considering.length} hasDNA={!!brandDNA} onShowOnboarding={() => setShowOnboarding(true)} />
+      {screen===SCREENS.HOME        && <HomeScreen setScreen={setScreen} hasDNA={!!brandDNA} />}
+      {screen===SCREENS.INDUCTION   && <InductionFlow onComplete={({ insights, dna, action }) => {
+        if (insights) setStepInsights(prev => ({ ...prev, ...insights }));
+        if (dna)      setBrandDNA(dna);
+        setScreen(action==="wardrobe" ? SCREENS.WARDROBE : SCREENS.BRAND);
+      }} />}
+      {screen===SCREENS.BRAND       && <BrandScreen stepInsights={stepInsights} setStepInsights={setStepInsights} stepMessages={stepMessages} setStepMessages={setStepMessages} brandDNA={brandDNA} setBrandDNA={setBrandDNA} />}
+      {screen===SCREENS.SIGNATURE   && <SignatureScreen brandDNA={brandDNA} signature={signature} setSignature={setSignature} setScreen={setScreen} />}
+      {screen===SCREENS.ABOUT       && <AboutScreen brandDNA={brandDNA} />}
+      {screen===SCREENS.WARDROBE    && <WardrobeScreen wardrobe={wardrobe} setWardrobe={setWardrobe} brandDNA={brandDNA} />}
+      {screen===SCREENS.DRESS       && <DressScreen wardrobe={wardrobe} brandDNA={brandDNA} setScreen={setScreen} />}
+      {screen===SCREENS.CHANGEROOM  && <ChangeRoomScreen brandDNA={brandDNA} considering={considering} setConsidering={setConsidering} />}
     </>
   );
 }
