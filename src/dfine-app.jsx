@@ -46,7 +46,7 @@ async function callClaude(messages, system, img = null, maxTokens = 800) {
       { type:"text", text:content }
     ];
   }
-  const res = await fetch("https:///api/claude", {
+  const res = await fetch("/api/claude", {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:maxTokens, system,
       messages:[...messages.slice(0,-1), {role:last.role, content}] })
@@ -3269,3 +3269,4 @@ export default function App() {
     </>
   );
 }
+
