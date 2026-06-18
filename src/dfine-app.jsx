@@ -2040,7 +2040,7 @@ function DressScreen({ wardrobe, brandDNA, setScreen }) {
       const today = new Date();
       const start = new Date(today); start.setHours(0,0,0,0);
       const end   = new Date(today); end.setHours(23,59,59,999);
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      const response = await fetch("/api/claude", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:1000,
@@ -3269,4 +3269,5 @@ export default function App() {
     </>
   );
 }
+
 
