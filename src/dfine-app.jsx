@@ -778,7 +778,7 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
   async function open() {
     setLoading(true);
     try {
-      const reply = await callClaude([{ role:"user", content:"Begin." }], STEP_PROMPTS[step.key], 600);
+      const reply = await callClaude([{ role:"user", content:"Begin." }], STEP_PROMPTS[step.key], null, 600);
       const found = extractInsight(reply);
       setMsgs([{ role:"assistant", content:stripInsight(reply) }]);
       if (found && !existingInsight) { setInsight(found); setEditVal(found); }
@@ -792,7 +792,7 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
     const history = [...msgs, { role:"user", content:text }];
     setMsgs(history); setInput(""); setLoading(true);
     try {
-      const reply = await callClaude(history, STEP_PROMPTS[step.key], 600);
+      const reply = await callClaude(history, STEP_PROMPTS[step.key], null, 600);
       const found = extractInsight(reply);
       setMsgs(prev => [...prev, { role:"assistant", content:stripInsight(reply) }]);
       if (found) { setInsight(found); setEditVal(found); }
@@ -3269,6 +3269,7 @@ export default function App() {
     </>
   );
 }
+
 
 
 
