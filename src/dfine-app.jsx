@@ -40,7 +40,7 @@ const GlobalStyles = () => (
 async function callClaude(messages, system, img = null, maxTokens = 800) {
   const last = messages[messages.length - 1];
   let content = last.content;
-  if (img && typeof content === "string") {
+  if (img && typeof img === "string" && img.length > 100 && typeof content === "string") {
     content = [
       { type:"image", source:{ type:"base64", media_type:"image/jpeg", data:img } },
       { type:"text", text:content }
@@ -3269,5 +3269,6 @@ export default function App() {
     </>
   );
 }
+
 
 
