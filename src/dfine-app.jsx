@@ -1040,7 +1040,7 @@ function InductionFlow({ onComplete }) {
   async function synthesise(all) {
     setSynth(true); setIScreen(7); window.scrollTo({ top:0 });
     try {
-      const result = await callClaude([{ role:"user", content:"Synthesise my Brand DNA." }], DNA_SYNTHESIS_PROMPT(all), 700);
+      const result = await callClaude([{ role:"user", content:"Synthesise my Brand DNA." }], DNA_SYNTHESIS_PROMPT(all), null, 700);
       setDna(result.trim());
     } catch { setDna("Unable to synthesise at this time. Please try again."); }
     setSynth(false);
@@ -3269,6 +3269,7 @@ export default function App() {
     </>
   );
 }
+
 
 
 
