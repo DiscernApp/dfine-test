@@ -48,7 +48,7 @@ async function callClaude(messages, system, img = null, maxTokens = 800) {
   }
   const res = await fetch("/api/claude", {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:maxTokens, system,
+    body: JSON.stringify({ model:"claude-sonnet-4-6", max_tokens:maxTokens, system,
       messages:[...messages.slice(0,-1), {role:last.role, content}] })
   });
   const d = await res.json();
@@ -2043,7 +2043,7 @@ function DressScreen({ wardrobe, brandDNA, setScreen }) {
       const response = await fetch("/api/claude", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:1000,
+          model:"claude-sonnet-4-6", max_tokens:1000,
           mcp_servers:[{ type:"url", url:"https://calendarmcp.googleapis.com/mcp/v1", name:"google-calendar" }],
           messages:[{ role:"user", content:`List my calendar events for today between ${start.toISOString()} and ${end.toISOString()}. Return them ordered by start time.` }]
         })
@@ -3269,6 +3269,7 @@ export default function App() {
     </>
   );
 }
+
 
 
 
