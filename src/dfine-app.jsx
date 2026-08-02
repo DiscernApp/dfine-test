@@ -512,9 +512,10 @@ Tone: ${insights.tone || "not captured"}
 Key Message: ${insights.message || "not captured"}
 Style Direction: ${insights.style || "not captured"}
 
-Write a cohesive Brand DNA profile. Format:
+Write a cohesive Brand DNA profile. Output ONLY these six lines, each starting with the exact label shown, followed by a colon. No preamble, no headings, no bold, no bullet points, no closing remarks.
+
+Professional Archetype: [stance name — a short evocative title, 2-4 words]
 Positioning: [one sentence]
-Professional Stance: [stance name + brief note]
 Audience: [specific audience]
 Tone: [3-5 words + brief description]
 Key Message: [the statement]
@@ -1018,7 +1019,28 @@ function InductionDNARevealScreen({ dna, onNext }) {
   const [vis, setVis] = useState(0);
   const lines = (dna||"").split("\n").filter(l=>l.trim());
   const parsed = {};
-  for (const ln of lines) { const m=ln.match(/^([A-Z][A-Z\s\/]+):\s*(.+)/); if(m) { const k=m[1].trim().toLowerCase().replace(/[\s\/]+/g,"_"); parsed[k]=m[2].trim(); } }
+  // Labels may come back in any case, optionally bolded, e.g. "**Key Message:**" or "KEY MESSAGE:".
+  for (const ln of lines) {
+    const m = ln.match(/^\s*\**\s*([A-Za-z][A-Za-z\s\/]{2,30}?)\s*\**\s*:\s*\**\s*(.+?)\s*\**\s*$/);
+    if (m) {
+      const k = m[1].trim().toLowerCase().replace(/[\s\/]+/g,"_");
+      parsed[k] = m[2].trim();
+    }
+  }
+  // Tolerate label variants between the synthesis prompt and this screen.
+  const alias = {
+    archetype:       ["professional_stance","professional_archetype","stance"],
+    key_message:     ["message","key_msg"],
+    style_direction: ["style"],
+    positioning:     ["position"],
+  };
+  for (const [canonical, variants] of Object.entries(alias)) {
+    if (!parsed[canonical]) {
+      const hit = variants.find(v => parsed[v]);
+      if (hit) parsed[canonical] = parsed[hit];
+    }
+  }
+  if (!Object.keys(parsed).length && dna) console.warn("[mirror] DNA parse produced no fields. Raw:", dna);
   if (parsed.brand_tags) parsed.tags = parsed.brand_tags.split(",").map(t=>t.trim()).filter(Boolean);
 
   const fields = [
