@@ -37,10 +37,15 @@ const GlobalStyles = () => (
 );
 
 // ─── API ──────────────────────────────────────────────────────────────────────
+// Strips UI-only fields (e.g. `hidden`) before messages go to the API.
+function forApi(msgs) {
+  return msgs.map(m => ({ role:m.role, content:m.content }));
+}
+
 async function callClaude(messages, system, img = null, maxTokens = 800) {
   const last = messages[messages.length - 1];
   let content = last.content;
-  if (img && typeof img === "string" && img.length > 100 && typeof content === "string") {
+  if (img && typeof content === "string") {
     content = [
       { type:"image", source:{ type:"base64", media_type:"image/jpeg", data:img } },
       { type:"text", text:content }
@@ -52,7 +57,16 @@ async function callClaude(messages, system, img = null, maxTokens = 800) {
       messages:[...messages.slice(0,-1), {role:last.role, content}] })
   });
   const d = await res.json();
-  return d.content?.[0]?.text ?? "";
+  if (!res.ok || d.error) {
+    console.error("Claude API error:", res.status, d.error || d);
+    throw new Error(d.error?.message || `API returned ${res.status}`);
+  }
+  const text = d.content?.[0]?.text;
+  if (!text) {
+    console.error("Claude API returned no text:", d);
+    throw new Error("Empty response from API");
+  }
+  return text;
 }
 
 function parseJSON(t) {
@@ -63,13 +77,36 @@ function parseJSON(t) {
 function extractInsight(t) { const m = t.match(/<INSIGHT>([\s\S]*?)<\/INSIGHT>/); return m ? m[1].trim() : null; }
 function stripInsight(t)    { return t.replace(/<INSIGHT>[\s\S]*?<\/INSIGHT>/g,"").trim(); }
 
-async function sGet(k) {
-  try { const r = await window.storage.get(k); return r ? JSON.parse(r.value) : null; } catch { return null; }
+// ─── Storage ──────────────────────────────────────────────────────────────────
+// Uses localStorage with a graceful in-memory fallback (private browsing, quota,
+// or any environment where localStorage is unavailable).
+const _memStore = {};
+function _hasLS() {
+  try { const k = "__dfine_probe__"; window.localStorage.setItem(k, "1"); window.localStorage.removeItem(k); return true; }
+  catch { return false; }
 }
-async function sSet(k,v) { try { await window.storage.set(k, JSON.stringify(v)); } catch {} }
+const _useLS = typeof window !== "undefined" && _hasLS();
+if (typeof window !== "undefined" && !_useLS) console.warn("[dfine] localStorage unavailable — falling back to in-memory storage; nothing will persist between sessions.");
+
+async function sGet(k) {
+  try {
+    const raw = _useLS ? window.localStorage.getItem(k) : (k in _memStore ? _memStore[k] : null);
+    return raw == null ? null : JSON.parse(raw);
+  } catch (e) { console.warn("[dfine] sGet failed", k, e); return null; }
+}
+async function sSet(k, v) {
+  try {
+    const raw = JSON.stringify(v);
+    if (_useLS) window.localStorage.setItem(k, raw); else _memStore[k] = raw;
+  } catch (e) { console.warn("[dfine] sSet failed", k, e); }
+}
+async function sDel(k) {
+  try { if (_useLS) window.localStorage.removeItem(k); else delete _memStore[k]; }
+  catch (e) { console.warn("[dfine] sDel failed", k, e); }
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const SCREENS    = { HOME:"home", INDUCTION:"induction", BRAND:"brand", BLUEPRINT:"blueprint", SIGNATURE:"signature", WARDROBE:"wardrobe", DRESS:"dress", ABOUT:"about", CHANGEROOM:"changeroom" };
+const SCREENS    = { HOME:"home", INDUCTION:"induction", BRAND:"brand", SIGNATURE:"signature", WARDROBE:"wardrobe", DRESS:"dress", ABOUT:"about", CHANGEROOM:"changeroom" };
 const CATEGORIES = ["Tops","Bottoms","Outerwear","Dresses & Suits","Shoes","Accessories","Bags","Other"];
 const OUTFIT_ACCENTS = ["var(--teal)","var(--green)","#0F6E56"];
 
@@ -94,6 +131,307 @@ function inferCategory(desc) {
   if (/watch|belt|scarf|tie|jewel|necklace|ring|earring|glasses/.test(d)) return "Accessories";
   return "Other";
 }
+
+// ─── Archetype visual selection (Mirror step 3 prototype) ─────────────────────
+const ARCHETYPE_SIGNALS = [
+  { id:"command",   signal:"Command / authority — decisive, in charge of the room.",   img:"/mirror/archetype-command.jpg" },
+  { id:"trust",     signal:"Trust / approachability — someone you'd confide in.",       img:"/mirror/archetype-trust.jpg" },
+  { id:"precision", signal:"Precision / expertise — knows exactly what they're doing.", img:"/mirror/archetype-precision.jpg" },
+  { id:"vision",    signal:"Vision — sees possibilities others miss.",                  img:"/mirror/archetype-vision.jpg" },
+  { id:"ground",    signal:"Groundedness — steady, someone you can rely on.",           img:"/mirror/archetype-ground.jpg" },
+  { id:"distinct",  signal:"Creativity / distinctiveness — doesn't fit the mould.",     img:"/mirror/archetype-distinct.jpg" },
+];
+
+function ArchetypeImageGrid({ onSelect }) {
+  const [selected, setSelected] = useState(null);
+  const [failed, setFailed]     = useState({});
+  function pick(a) { setSelected(a.id); setTimeout(() => onSelect(a), 550); }
+  return (
+    <div style={{ padding:"24px 20px" }}>
+      <p style={{ fontFamily:"var(--serif)", fontSize:16, fontWeight:300, fontStyle:"italic", color:"var(--muted)", lineHeight:1.7, marginBottom:20 }}>
+        Which of these feels most like how you show up?
+      </p>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        {ARCHETYPE_SIGNALS.map(a => (
+          <button key={a.id} onClick={() => pick(a)} disabled={!!selected}
+            style={{ position:"relative", padding:0, border:selected===a.id?"2px solid var(--teal)":"1px solid var(--border)",
+              background:failed[a.id]?"var(--surface)":"none", cursor:selected?"default":"pointer", overflow:"hidden", aspectRatio:"3/4",
+              opacity:selected && selected!==a.id ? 0.35 : 1, transition:"opacity 0.4s ease, border 0.3s ease" }}>
+            {failed[a.id] ? (
+              <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", padding:"14px 12px", textAlign:"center" }}>
+                <p style={{ fontFamily:"var(--serif)", fontSize:13, fontWeight:300, fontStyle:"italic", lineHeight:1.5, color:"var(--muted)" }}>
+                  {a.signal.split("—")[0].trim()}
+                </p>
+              </div>
+            ) : (
+              <img src={a.img} alt="" loading="eager"
+                onError={() => { console.warn("[mirror] archetype image failed to load:", a.img); setFailed(f => ({ ...f, [a.id]:true })); }}
+                style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+            )}
+            {selected===a.id && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(29,158,117,0.15)", display:"flex", alignItems:"flex-end", justifyContent:"center", padding:10 }}>
+                <div style={{ width:22, height:22, borderRadius:"50%", background:"var(--teal)", color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>✓</div>
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Tone card selection (Mirror step 4 prototype) ─────────────────────────────
+const TONE_CARDS = [
+  { id:"direct",    words:["Direct","Sharp","No-nonsense"],      bg:"#2A2A28" },
+  { id:"warm",      words:["Warm","Steady","Reassuring"],        bg:"#4A5D52" },
+  { id:"playful",   words:["Playful","Quick-witted","Unpretentious"], bg:"#8A6A4A" },
+  { id:"measured",  words:["Measured","Precise","Authoritative"],bg:"#3A3F4A" },
+  { id:"bold",      words:["Bold","Provocative","Unapologetic"], bg:"#5A2E2E" },
+  { id:"considered",words:["Calm","Considered","Wise"],          bg:"#3F4A3A" },
+];
+
+function ToneCardGrid({ onSelect }) {
+  const [selected, setSelected] = useState(null);
+  function pick(t) { setSelected(t.id); setTimeout(() => onSelect(t), 550); }
+  return (
+    <div style={{ padding:"24px 20px" }}>
+      <p style={{ fontFamily:"var(--serif)", fontSize:16, fontWeight:300, fontStyle:"italic", color:"var(--muted)", lineHeight:1.7, marginBottom:20 }}>
+        Which of these clusters sounds most like your voice?
+      </p>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        {TONE_CARDS.map(t => (
+          <button key={t.id} onClick={() => pick(t)} disabled={!!selected}
+            style={{ position:"relative", padding:"22px 14px", minHeight:104, border:selected===t.id?"2px solid var(--teal)":"1px solid transparent",
+              background:t.bg, cursor:selected?"default":"pointer", textAlign:"left", display:"flex", flexDirection:"column", justifyContent:"center", gap:5,
+              opacity:selected && selected!==t.id ? 0.35 : 1, transition:"opacity 0.4s ease, border 0.3s ease" }}>
+            {t.words.map((w,i) => (
+              <span key={i} style={{ fontFamily:"var(--serif)", fontStyle:"italic", fontSize:i===0?16:13, fontWeight:i===0?400:300, color:"rgba(248,247,245,0.92)", lineHeight:1.3 }}>{w}</span>
+            ))}
+            {selected===t.id && (
+              <div style={{ position:"absolute", top:8, right:8, width:20, height:20, borderRadius:"50%", background:"var(--teal)", color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11 }}>✓</div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Positioning spectrum sliders (Mirror step 1 prototype) ────────────────────
+const POSITIONING_AXES = [
+  { id:"breadth", left:"Generalist",        right:"Specialist" },
+  { id:"mode",    left:"Operator",          right:"Advisor" },
+  { id:"stage",   left:"Behind the scenes", right:"Front and centre" },
+];
+
+function PositioningSliders({ onSelect }) {
+  const [vals, setVals]     = useState({ breadth:50, mode:50, stage:50 });
+  const [locked, setLocked] = useState(false);
+  const [touched, setTouched] = useState({});
+
+  function label(axis, v) {
+    if (v <= 20) return `strongly ${axis.left.toLowerCase()}`;
+    if (v <= 40) return `leans ${axis.left.toLowerCase()}`;
+    if (v < 60)  return `balanced between ${axis.left.toLowerCase()} and ${axis.right.toLowerCase()}`;
+    if (v < 80)  return `leans ${axis.right.toLowerCase()}`;
+    return `strongly ${axis.right.toLowerCase()}`;
+  }
+
+  function commit() {
+    setLocked(true);
+    const summary = POSITIONING_AXES.map(a => `${a.left} ↔ ${a.right}: ${label(a, vals[a.id])}`).join("; ");
+    setTimeout(() => onSelect({ vals, summary }), 550);
+  }
+
+  const allTouched = POSITIONING_AXES.every(a => touched[a.id]);
+
+  return (
+    <div style={{ padding:"24px 20px" }}>
+      <p style={{ fontFamily:"var(--serif)", fontSize:16, fontWeight:300, fontStyle:"italic", color:"var(--muted)", lineHeight:1.7, marginBottom:26 }}>
+        Before we talk — roughly where do you sit on each of these?
+      </p>
+      {POSITIONING_AXES.map(a => (
+        <div key={a.id} style={{ marginBottom:28, opacity:locked?0.5:1, transition:"opacity 0.4s ease" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:9 }}>
+            <span style={{ fontFamily:"var(--sans)", fontSize:11, letterSpacing:"0.09em", textTransform:"uppercase", color:"var(--muted)" }}>{a.left}</span>
+            <span style={{ fontFamily:"var(--sans)", fontSize:11, letterSpacing:"0.09em", textTransform:"uppercase", color:"var(--muted)" }}>{a.right}</span>
+          </div>
+          <input type="range" min={0} max={100} value={vals[a.id]} disabled={locked}
+            onChange={e => { setVals(v => ({ ...v, [a.id]:Number(e.target.value) })); setTouched(t => ({ ...t, [a.id]:true })); }}
+            style={{ width:"100%", accentColor:"var(--teal)", cursor:locked?"default":"pointer" }} />
+          <p style={{ fontFamily:"var(--serif)", fontStyle:"italic", fontSize:13, fontWeight:300, color:touched[a.id]?"var(--teal)":"var(--muted)", marginTop:7, transition:"color 0.3s" }}>
+            {touched[a.id] ? label(a, vals[a.id]) : "Drag to place yourself"}
+          </p>
+        </div>
+      ))}
+      <button onClick={commit} disabled={!allTouched || locked}
+        style={{ width:"100%", background:allTouched&&!locked?"var(--teal)":"var(--border)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.16em", textTransform:"uppercase", padding:"14px 0", marginTop:6, cursor:allTouched&&!locked?"pointer":"default", transition:"background 0.3s" }}>
+        {locked ? "✓" : "That's about right →"}
+      </button>
+    </div>
+  );
+}
+
+// ─── Impact statement cards (Mirror step 5 prototype) ──────────────────────────
+const MESSAGE_CARDS = [
+  { id:"clarity",   statement:"Things get clearer when I'm in the room." },
+  { id:"standards", statement:"I hold the line on quality when it's easier not to." },
+  { id:"momentum",  statement:"I turn stalled things into moving things." },
+  { id:"truth",     statement:"I say the thing everyone's thinking but won't." },
+  { id:"trust",     statement:"People bring me the problems they can't take anywhere else." },
+  { id:"possible",  statement:"I make people believe a bigger version is possible." },
+];
+
+function MessageCardGrid({ onSelect }) {
+  const [selected, setSelected] = useState(null);
+  function pick(m) { setSelected(m.id); setTimeout(() => onSelect(m), 550); }
+  return (
+    <div style={{ padding:"24px 20px" }}>
+      <p style={{ fontFamily:"var(--serif)", fontSize:16, fontWeight:300, fontStyle:"italic", color:"var(--muted)", lineHeight:1.7, marginBottom:20 }}>
+        Which of these is closest to what you'd want people to leave with? None will be exact — pick the nearest.
+      </p>
+      <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
+        {MESSAGE_CARDS.map(m => (
+          <button key={m.id} onClick={() => pick(m)} disabled={!!selected}
+            style={{ position:"relative", padding:"18px 18px", border:selected===m.id?"2px solid var(--teal)":"1px solid var(--border)",
+              background:selected===m.id?"var(--teal-bg)":"white", boxShadow:"var(--shadow)", cursor:selected?"default":"pointer", textAlign:"left",
+              opacity:selected && selected!==m.id ? 0.35 : 1, transition:"opacity 0.4s ease, border 0.3s ease, background 0.3s ease" }}>
+            <p style={{ fontFamily:"var(--serif)", fontSize:15, fontWeight:400, fontStyle:"italic", lineHeight:1.55, color:"var(--ink)", paddingRight:selected===m.id?26:0 }}>
+              "{m.statement}"
+            </p>
+            {selected===m.id && (
+              <div style={{ position:"absolute", top:16, right:14, width:20, height:20, borderRadius:"50%", background:"var(--teal)", color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11 }}>✓</div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Audience persona selection (Mirror step 2) ────────────────────────────────
+const AUDIENCE_PERSONAS = [
+  { id:"exec",      signal:"The board or executive you report to — assessing you, waiting to be convinced.", img:"/mirror/audience-exec.jpg" },
+  { id:"team",      signal:"The team you lead — receptive, waiting for direction.",                          img:"/mirror/audience-team.jpg" },
+  { id:"peer",      signal:"A peer you need to influence without authority — not hostile, not yet on board.", img:"/mirror/audience-peer.jpg" },
+  { id:"sceptic",   signal:"The sceptic — has heard this pitch before.",                                     img:"/mirror/audience-sceptic.jpg" },
+  { id:"potential", signal:"A high performer you might lose — capable, quietly assessing whether to stay.",   img:"/mirror/audience-potential.jpg" },
+  { id:"client",    signal:"The client or external market — transactional, deciding.",                       img:"/mirror/audience-client.jpg" },
+];
+
+function AudiencePersonaGrid({ onSelect }) {
+  const [selected, setSelected] = useState(null);
+  const [failed, setFailed]     = useState({});
+  function pick(p) { setSelected(p.id); setTimeout(() => onSelect(p), 550); }
+  return (
+    <div style={{ padding:"24px 20px" }}>
+      <p style={{ fontFamily:"var(--serif)", fontSize:16, fontWeight:300, fontStyle:"italic", color:"var(--muted)", lineHeight:1.7, marginBottom:20 }}>
+        When it really matters, who are you actually trying to reach?
+      </p>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        {AUDIENCE_PERSONAS.map(p => (
+          <button key={p.id} onClick={() => pick(p)} disabled={!!selected}
+            style={{ position:"relative", padding:0, border:selected===p.id?"2px solid var(--teal)":"1px solid var(--border)",
+              background:failed[p.id]?"var(--surface)":"none", cursor:selected?"default":"pointer", overflow:"hidden", aspectRatio:"3/4",
+              opacity:selected && selected!==p.id ? 0.35 : 1, transition:"opacity 0.4s ease, border 0.3s ease" }}>
+            {failed[p.id] ? (
+              <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", padding:"14px 12px", textAlign:"center" }}>
+                <p style={{ fontFamily:"var(--serif)", fontSize:13, fontWeight:300, fontStyle:"italic", lineHeight:1.5, color:"var(--muted)" }}>
+                  {p.signal.split("—")[0].trim()}
+                </p>
+              </div>
+            ) : (
+              <img src={p.img} alt="" loading="eager"
+                onError={() => { console.warn("[mirror] audience image failed to load:", p.img); setFailed(f => ({ ...f, [p.id]:true })); }}
+                style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+            )}
+            {selected===p.id && (
+              <div style={{ position:"absolute", inset:0, background:"rgba(29,158,117,0.15)", display:"flex", alignItems:"flex-end", justifyContent:"center", padding:10 }}>
+                <div style={{ width:22, height:22, borderRadius:"50%", background:"var(--teal)", color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>✓</div>
+              </div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Style direction mood board (Mirror step 6) ────────────────────────────────
+const STYLE_SWATCHES = [
+  { id:"minimalist",   label:"Tailored minimalist",  signal:"clean lines, no ornament, quiet precision",        img:"/mirror/style-minimalist.jpg" },
+  { id:"textured",     label:"Warm and textured",    signal:"soft materials, warmth, approachability",          img:"/mirror/style-textured.jpg" },
+  { id:"heritage",     label:"Classic heritage",     signal:"established, considered, traditional craft",       img:"/mirror/style-heritage.jpg" },
+  { id:"architectural",label:"Modern architectural", signal:"sharp, structural, deliberately contemporary",     img:"/mirror/style-architectural.jpg" },
+  { id:"relaxed",      label:"Relaxed and soft",     signal:"unforced, easy, low-formality",                    img:"/mirror/style-relaxed.jpg" },
+  { id:"bold",         label:"Bold and graphic",     signal:"strong colour, high contrast, hard to overlook",   img:"/mirror/style-bold.jpg" },
+];
+
+function StyleMoodBoard({ onSelect }) {
+  const [selected, setSelected] = useState(null);
+  const [failed, setFailed]     = useState({});
+  function pick(s) { setSelected(s.id); setTimeout(() => onSelect(s), 550); }
+  return (
+    <div style={{ padding:"24px 20px" }}>
+      <p style={{ fontFamily:"var(--serif)", fontSize:16, fontWeight:300, fontStyle:"italic", color:"var(--muted)", lineHeight:1.7, marginBottom:20 }}>
+        Which of these feels closest to the register you want to work in?
+      </p>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+        {STYLE_SWATCHES.map(s => (
+          <button key={s.id} onClick={() => pick(s)} disabled={!!selected}
+            style={{ position:"relative", padding:0, border:selected===s.id?"2px solid var(--teal)":"1px solid var(--border)",
+              background:failed[s.id]?"var(--surface)":"none", cursor:selected?"default":"pointer", overflow:"hidden", aspectRatio:"1/1",
+              opacity:selected && selected!==s.id ? 0.35 : 1, transition:"opacity 0.4s ease, border 0.3s ease" }}>
+            {failed[s.id] ? (
+              <div style={{ width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center", padding:"12px" }}>
+                <p style={{ fontFamily:"var(--serif)", fontSize:13, fontWeight:300, fontStyle:"italic", lineHeight:1.5, color:"var(--muted)", textAlign:"center" }}>{s.label}</p>
+              </div>
+            ) : (
+              <img src={s.img} alt="" loading="eager"
+                onError={() => { console.warn("[mirror] style image failed to load:", s.img); setFailed(f => ({ ...f, [s.id]:true })); }}
+                style={{ width:"100%", height:"100%", objectFit:"cover", display:"block" }} />
+            )}
+            <div style={{ position:"absolute", left:0, right:0, bottom:0, padding:"18px 10px 8px",
+              background:"linear-gradient(to top, rgba(20,20,18,0.82), rgba(20,20,18,0))" }}>
+              <p style={{ fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.1em", textTransform:"uppercase", color:"rgba(248,247,245,0.95)", textAlign:"left" }}>{s.label}</p>
+            </div>
+            {selected===s.id && (
+              <div style={{ position:"absolute", top:8, right:8, width:22, height:22, borderRadius:"50%", background:"var(--teal)", color:"white", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12 }}>✓</div>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Visual stage config — maps a Mirror step to its pre-conversation picker ───
+const STEP_VISUAL_STAGES = {
+  positioning: {
+    Component: PositioningSliders,
+    openingPrompt: opt => `Before the conversation, the user placed themselves on three positioning spectrums: ${opt.summary}. Open your very first message by reflecting one thing that placement suggests, then ask your sharp opening question about what they do and who they serve — e.g. "That puts you somewhere specific already. [one observation]. So tell me — what do you actually do, and who's it for?" Do not use your usual generic framing sentence; use their placement as the hook instead. Then continue with the rest of your instructions.`,
+  },
+  audience: {
+    Component: AudiencePersonaGrid,
+    openingPrompt: opt => `The user selected this audience as the one that matters most to them: ${opt.signal} Open your very first message by asking what makes that particular group the one they most need to land with — e.g. "That's a specific room to be in. What is it about them that makes getting through matter most?" Nothing more, no generic framing sentence. Then continue with the rest of your instructions.`,
+  },
+  archetype: {
+    Component: ArchetypeImageGrid,
+    openingPrompt: opt => `The user selected an image representing this archetype signal: ${opt.signal} Open your very first message with exactly: "What is it about that image?" — nothing more, no framing sentence. Then continue with the rest of your instructions once they respond.`,
+  },
+  tone: {
+    Component: ToneCardGrid,
+    openingPrompt: opt => `The user selected this tone cluster: ${opt.words.join(", ")}. Open your very first message by reflecting that back in one line and asking if it's already close or if there's a layer underneath to get right — e.g. "You picked ${opt.words.join(", ").toLowerCase()} — does that already feel true, or is there something under that we should name?" Then continue with the rest of your instructions once they respond.`,
+  },
+  message: {
+    Component: MessageCardGrid,
+    openingPrompt: opt => `The user picked this statement as nearest to their key message: "${opt.statement}" They were told none would be exact. Open your very first message by asking what's slightly off about it for them — e.g. "You picked that one. What's not quite right about it?" Nothing more, no framing sentence. Their correction is the real material. Then continue with the rest of your instructions.`,
+  },
+  style: {
+    Component: StyleMoodBoard,
+    openingPrompt: opt => `The user selected this style register: ${opt.label} — ${opt.signal}. Open your very first message by asking whether that's the register they already work in or the one they want to move toward — e.g. "${opt.label.toLowerCase()} — is that where you already sit, or where you're heading?" Nothing more, no generic framing sentence. The gap between the two is the useful material. Then continue with the rest of your instructions.`,
+  },
+};
 
 // ─── AI Prompts ───────────────────────────────────────────────────────────────
 const STEP_PROMPTS = {
@@ -183,37 +521,6 @@ Key Message: [the statement]
 Style Direction: [aesthetic description]
 
 Be precise. Distil rather than summarise. This should feel like seeing yourself clearly for the first time.`;
-
-// ─── Presence Blueprint Synthesis ─────────────────────────────────────────────
-const BLUEPRINT_SYNTHESIS_PROMPT = (insights, currentRead) => `You are synthesising a Presence Blueprint — a precise, personal document that defines the gap between how this professional is currently read and how they intend to be read. This is not a personality profile. It is a strategic presence document.
-
-BRAND DNA INSIGHTS:
-Positioning: ${insights.positioning || "not captured"}
-Audience: ${insights.audience || "not captured"}
-Professional Stance: ${insights.archetype || "not captured"}
-Tone: ${insights.tone || "not captured"}
-Key Message: ${insights.message || "not captured"}
-Style Direction: ${insights.style || "not captured"}
-
-CURRENT READ (how they describe being perceived today):
-${currentRead || "not provided"}
-
-Produce a Presence Blueprint in exactly this JSON format. Be precise, personal, and specific to this individual — not generic. Write as if you know them.
-
-{
-  "presenceStatement": "Two sentences. The professional they are building toward — written as felt description, not a label. Should feel like seeing yourself clearly. Example: 'Calm authority with modern credibility. The person in the room who already knows where this is going.'",
-  "currentRead": "One sentence. How the room currently reads them, drawn from their own words. Honest but not harsh. Example: 'Capable and reliable — the person others depend on, but not yet the person others defer to.'",
-  "targetRead": "One sentence. How they want to be read, distilled from their positioning and key message. Example: 'The strategic mind in the room — the one whose read on the situation shapes what happens next.'",
-  "amplify": ["3–4 short phrases. Qualities that are present but under-expressed — should become more visible. Example: 'Strategic conviction', 'Executive point of view', 'Deliberate authority'"],
-  "reduce": ["2–3 short phrases. What is currently over-signalled and creating the wrong read. Example: 'Over-explanation', 'Deference in rooms where leadership is expected'"],
-  "contexts": [
-    { "name": "Context name — e.g. Board Presentations", "emphasis": "One sentence on what this room specifically needs from them. Example: 'Lead with certainty and direction — this room wants to know you know where this is going.'" },
-    { "name": "Second context — e.g. Team Leadership", "emphasis": "One sentence." },
-    { "name": "Third context — e.g. External Visibility", "emphasis": "One sentence." }
-  ]
-}
-
-Return ONLY valid JSON. No preamble, no explanation. The contexts should be inferred from their positioning and audience — make them feel real and specific, not generic.`;
 
 // Single item assessment
 const buildWardrobeSystem = (dna) => `You are a perceptive style confidant working within a peer-reviewed research framework (Hester & Hehman, 2023). Reflect on what this clothing item actually communicates across four dimensions.
@@ -454,238 +761,11 @@ function SignalRadar({ signals, compact=false }) {
   );
 }
 
-// ─── PRESENCE BLUEPRINT ───────────────────────────────────────────────────────
-function BlueprintScreen({ blueprint, stepInsights, brandDNA, setBlueprint, setScreen }) {
-  const [generating, setGenerating] = useState(false);
-  const [vis, setVis]               = useState(0);
-  const [currentRead, setCurrentRead] = useState("");
-  const [showCapture, setShowCapture] = useState(false);
-
-  const hasBlueprint = blueprint && blueprint.presenceStatement;
-
-  useEffect(() => {
-    if (hasBlueprint) {
-      let i = 0;
-      const t = setInterval(() => { i++; setVis(i); if (i >= 9) clearInterval(t); }, 300);
-      return () => clearInterval(t);
-    }
-  }, [hasBlueprint]);
-
-  async function generate() {
-    if (!brandDNA) return;
-    setGenerating(true);
-    try {
-      const result = await callClaude(
-        [{ role:"user", content:"Generate my Presence Blueprint." }],
-        BLUEPRINT_SYNTHESIS_PROMPT(stepInsights, currentRead),
-        1200
-      );
-      const parsed = parseJSON(result);
-      if (parsed) {
-        setBlueprint(parsed);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-    setGenerating(false);
-    setShowCapture(false);
-    setVis(0);
-  }
-
-  // Empty state — no DNA yet
-  if (!brandDNA) return (
-    <div style={{ height:"100vh", paddingTop:56, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"80px 24px", textAlign:"center" }}>
-      <MirrorMark size={36} color="var(--border)" />
-      <h2 style={{ fontFamily:"var(--serif)", fontSize:24, fontWeight:400, color:"var(--ink)", marginTop:24, marginBottom:12 }}>Your Blueprint starts with The Mirror.</h2>
-      <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.8, maxWidth:360, fontWeight:300 }}>Complete The Mirror first. Your Presence Blueprint is generated from everything you articulate there.</p>
-      <button onClick={() => setScreen(SCREENS.BRAND)} style={{ marginTop:28, background:"var(--ink)", color:"var(--bg)", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.16em", textTransform:"uppercase", padding:"13px 28px", cursor:"pointer" }}>
-        Open The Mirror →
-      </button>
-    </div>
-  );
-
-  // Current read capture modal
-  if (showCapture) return (
-    <div style={{ height:"100vh", paddingTop:56, display:"flex", flexDirection:"column", maxWidth:520, margin:"0 auto", padding:"56px 24px 40px" }}>
-      <div style={{ animation:"fadeUp 0.5s ease both" }}>
-        <MirrorMark size={30} />
-        <Cap style={{ marginTop:20, marginBottom:10 }}>Before we build your Blueprint</Cap>
-        <h2 style={{ fontFamily:"var(--serif)", fontSize:26, fontWeight:400, lineHeight:1.15, marginBottom:16 }}>
-          How does the room<br />currently read you?
-        </h2>
-        <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.8, fontWeight:300, marginBottom:28 }}>
-          Not how you want to be read. How you're actually perceived right now — the read you're working from, or working against. A sentence or two is enough.
-        </p>
-        <textarea
-          value={currentRead}
-          onChange={e => setCurrentRead(e.target.value)}
-          placeholder="e.g. Capable and dependable — the person others rely on but not always the one setting the direction…"
-          rows={4}
-          style={{ width:"100%", background:"white", borderLeft:"3px solid var(--teal)", border:"none", color:"var(--ink)", fontFamily:"var(--serif)", fontSize:15, fontWeight:300, fontStyle:"italic", padding:"16px 18px", resize:"none", outline:"none", lineHeight:1.75, boxShadow:"var(--shadow)" }}
-        />
-        <p style={{ fontSize:11, color:"var(--muted)", fontStyle:"italic", marginTop:10, lineHeight:1.6, fontWeight:300 }}>
-          If you've used Signl, this is where that read belongs. If not, your own honest sense of it works just as well.
-        </p>
-        <div style={{ display:"flex", gap:10, marginTop:24 }}>
-          <button onClick={generate} disabled={generating}
-            style={{ flex:1, background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.16em", textTransform:"uppercase", padding:"14px", cursor:"pointer" }}>
-            {generating ? "Building your Blueprint…" : "Build my Presence Blueprint →"}
-          </button>
-          <button onClick={() => { setCurrentRead(""); generate(); }}
-            style={{ background:"none", border:"1.5px solid var(--border)", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:11, letterSpacing:"0.12em", textTransform:"uppercase", padding:"14px 16px", cursor:"pointer", whiteSpace:"nowrap" }}>
-            Skip
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Generating state
-  if (generating) return (
-    <div style={{ height:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:24, padding:48 }}>
-      <div style={{ width:64, height:64, borderRadius:"50%", border:"1.5px solid var(--border)", display:"flex", alignItems:"center", justifyContent:"center" }}>
-        <MirrorMark size={24} />
-      </div>
-      <p style={{ fontFamily:"var(--serif)", fontSize:17, fontWeight:300, color:"var(--muted)", animation:"pulse 2s ease infinite", textAlign:"center" }}>
-        Defining your professional presence…
-      </p>
-    </div>
-  );
-
-  // No blueprint yet
-  if (!hasBlueprint) return (
-    <div style={{ height:"100vh", paddingTop:56, display:"flex", flexDirection:"column", maxWidth:540, margin:"0 auto", padding:"64px 24px 48px", alignItems:"flex-start" }}>
-      <div style={{ animation:"fadeUp 0.5s ease both" }}>
-        <Cap style={{ marginBottom:12 }}>Your Presence Blueprint</Cap>
-        <h2 style={{ fontFamily:"var(--serif)", fontSize:"clamp(26px,5vw,34px)", fontWeight:400, lineHeight:1.1, marginBottom:18 }}>
-          Build your professional<br />presence on purpose.
-        </h2>
-        <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.85, fontWeight:300, marginBottom:10 }}>
-          Your Brand DNA defines who you are. The Presence Blueprint defines the gap you're closing — and gives you a deliberate framework for closing it.
-        </p>
-        <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.85, fontWeight:300, marginBottom:32, paddingLeft:14, borderLeft:"2px solid var(--teal-bg)", fontStyle:"italic" }}>
-          Most professionals spend years developing expertise. Few spend time developing how that expertise is perceived. The Blueprint changes that.
-        </p>
-        <button onClick={() => setShowCapture(true)}
-          style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.17em", textTransform:"uppercase", padding:"15px 32px", cursor:"pointer" }}>
-          Build my Presence Blueprint →
-        </button>
-      </div>
-    </div>
-  );
-
-  // Blueprint reveal
-  return (
-    <div style={{ minHeight:"100vh", paddingTop:56, background:"var(--bg)" }}>
-      <div style={{ maxWidth:580, margin:"0 auto", padding:"48px 24px 80px" }}>
-
-        {/* Header */}
-        <div style={{ opacity:vis>0?1:0, transform:vis>0?"none":"translateY(14px)", transition:"all 0.5s ease", marginBottom:48 }}>
-          <Cap style={{ marginBottom:12, letterSpacing:"0.22em" }}>Presence Blueprint</Cap>
-          <div style={{ width:40, height:1, background:"var(--teal)", marginBottom:24 }} />
-          <p style={{ fontFamily:"var(--serif)", fontSize:"clamp(28px,6vw,42px)", fontWeight:400, lineHeight:1.08, color:"var(--ink)" }}>
-            {blueprint.presenceStatement}
-          </p>
-        </div>
-
-        {/* Current → Target gap */}
-        <div style={{ opacity:vis>1?1:0, transform:vis>1?"none":"translateY(12px)", transition:"all 0.5s ease", marginBottom:40 }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:1, background:"var(--border)" }}>
-            <div style={{ background:"var(--bg)", padding:"20px 22px" }}>
-              <Cap style={{ color:"var(--muted)", marginBottom:10, fontSize:9 }}>Current Read</Cap>
-              <p style={{ fontFamily:"var(--serif)", fontSize:14, fontWeight:400, lineHeight:1.7, color:"var(--muted)", fontStyle:"italic" }}>
-                {blueprint.currentRead}
-              </p>
-            </div>
-            <div style={{ background:"var(--teal-bg)", padding:"20px 22px", borderLeft:"3px solid var(--teal)" }}>
-              <Cap style={{ marginBottom:10, fontSize:9 }}>Target Read</Cap>
-              <p style={{ fontFamily:"var(--serif)", fontSize:14, fontWeight:400, lineHeight:1.7, color:"var(--ink)" }}>
-                {blueprint.targetRead}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Amplify */}
-        <div style={{ opacity:vis>2?1:0, transform:vis>2?"none":"translateY(12px)", transition:"all 0.5s ease", marginBottom:32, paddingBottom:32, borderBottom:"1px solid var(--border)" }}>
-          <Cap style={{ color:"var(--teal)", marginBottom:14, fontSize:9, letterSpacing:"0.2em" }}>Amplify</Cap>
-          <p style={{ fontSize:11, color:"var(--muted)", fontWeight:300, marginBottom:14, lineHeight:1.6 }}>What's present but under-expressed. These qualities should become more visible.</p>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-            {(blueprint.amplify || []).map((item, i) => (
-              <span key={i} style={{ fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.13em", textTransform:"uppercase", color:"var(--teal)", border:"1.5px solid rgba(29,158,117,0.35)", padding:"7px 14px", animation:`fadeUp 0.4s ${i*0.06}s ease both` }}>
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Reduce */}
-        <div style={{ opacity:vis>3?1:0, transform:vis>3?"none":"translateY(12px)", transition:"all 0.5s ease", marginBottom:32, paddingBottom:32, borderBottom:"1px solid var(--border)" }}>
-          <Cap style={{ color:"var(--muted)", marginBottom:14, fontSize:9, letterSpacing:"0.2em" }}>Reduce</Cap>
-          <p style={{ fontSize:11, color:"var(--muted)", fontWeight:300, marginBottom:14, lineHeight:1.6 }}>What's currently over-signalled and creating the wrong read.</p>
-          <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-            {(blueprint.reduce || []).map((item, i) => (
-              <span key={i} style={{ fontFamily:"var(--sans)", fontSize:10, fontWeight:400, letterSpacing:"0.12em", textTransform:"uppercase", color:"var(--muted)", border:"1px solid var(--border)", padding:"7px 14px" }}>
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        {/* Context Variations */}
-        <div style={{ opacity:vis>4?1:0, transform:vis>4?"none":"translateY(12px)", transition:"all 0.5s ease", marginBottom:40 }}>
-          <Cap style={{ color:"var(--muted)", marginBottom:6, fontSize:9, letterSpacing:"0.2em" }}>Context Variations</Cap>
-          <p style={{ fontSize:11, color:"var(--muted)", fontWeight:300, marginBottom:20, lineHeight:1.6 }}>The same presence, different emphasis. What each context specifically requires of you.</p>
-          <div style={{ display:"flex", flexDirection:"column", gap:1, background:"var(--border)" }}>
-            {(blueprint.contexts || []).map((ctx, i) => (
-              <div key={i} style={{ background:"var(--bg)", padding:"20px 22px", display:"flex", gap:20, alignItems:"flex-start", animation:`fadeUp 0.4s ${i*0.08}s ease both` }}>
-                <span style={{ fontFamily:"var(--serif)", fontSize:18, color:"var(--teal-lt)", fontWeight:300, flexShrink:0, minWidth:20, paddingTop:1 }}>
-                  {String.fromCharCode(65+i)}
-                </span>
-                <div>
-                  <p style={{ fontSize:11, fontWeight:500, letterSpacing:"0.1em", textTransform:"uppercase", color:"var(--ink)", marginBottom:7 }}>{ctx.name}</p>
-                  <p style={{ fontFamily:"var(--serif)", fontSize:14, fontWeight:300, lineHeight:1.75, color:"var(--muted)", fontStyle:"italic" }}>{ctx.emphasis}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Philosophy footer */}
-        <div style={{ opacity:vis>5?1:0, transition:"opacity 0.5s ease", marginBottom:36, padding:"22px 24px", background:"var(--surface)" }}>
-          <p style={{ fontFamily:"var(--serif)", fontSize:13, fontWeight:300, lineHeight:1.9, color:"var(--muted)", fontStyle:"italic" }}>
-            "Most professionals spend years developing expertise. Few spend time developing how that expertise is perceived. The result is that opportunities, authority, and influence are often shaped by signals they never intended to send."
-          </p>
-          <p style={{ fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", color:"var(--teal)", marginTop:12, fontWeight:500 }}>Professional Presence on Purpose — Dfine</p>
-        </div>
-
-        {/* Actions */}
-        <div style={{ opacity:vis>6?1:0, transition:"opacity 0.5s ease", display:"flex", gap:10, flexWrap:"wrap" }}>
-          <button onClick={() => { setBlueprint(null); setVis(0); setShowCapture(true); }}
-            style={{ background:"none", border:"1.5px solid var(--border)", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:10, letterSpacing:"0.14em", textTransform:"uppercase", padding:"11px 20px", cursor:"pointer" }}>
-            Regenerate
-          </button>
-          <button onClick={() => setScreen(SCREENS.WARDROBE)}
-            style={{ background:"var(--teal)", color:"white", border:"none", fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.14em", textTransform:"uppercase", padding:"11px 20px", cursor:"pointer" }}>
-            Open Wardrobe →
-          </button>
-          <button onClick={() => setScreen(SCREENS.DRESS)}
-            style={{ background:"var(--ink)", color:"var(--bg)", border:"none", fontFamily:"var(--sans)", fontSize:10, fontWeight:500, letterSpacing:"0.14em", textTransform:"uppercase", padding:"11px 20px", cursor:"pointer" }}>
-            Dress For… →
-          </button>
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
 // ─── Nav ──────────────────────────────────────────────────────────────────────
-function Nav({ screen, setScreen, wardrobeCount, consideringCount, hasDNA, hasBlueprint, onShowOnboarding }) {
+function Nav({ screen, setScreen, wardrobeCount, consideringCount, hasDNA, onShowOnboarding }) {
   const tabs = [
     { id:SCREENS.HOME,       label:"Home",                              locked:false },
     { id:SCREENS.BRAND,      label:"My Brand",    dot:hasDNA,           locked:false },
-    { id:SCREENS.BLUEPRINT,  label:"Blueprint",   dot:hasBlueprint,     locked:!hasDNA },
     { id:SCREENS.SIGNATURE,  label:"Signature",   dot:hasDNA,           locked:!hasDNA },
     { id:SCREENS.ABOUT,      label:"Your About",  dot:hasDNA,           locked:!hasDNA },
     { id:SCREENS.WARDROBE,   label:wardrobeCount>0?`Wardrobe (${wardrobeCount})`:"Wardrobe", locked:!hasDNA },
@@ -772,17 +852,31 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
+  const stage = STEP_VISUAL_STAGES[step.key];
+  const [picked, setPicked] = useState(null);
+  const showStage = !!stage && !picked && !existingInsight;
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs, loading, insight]);
-  useEffect(() => { if (msgs.length === 0) open(); }, []);
+
+  useEffect(() => {
+    console.log("[mirror] StepScreen MOUNT", { step:step.key, stepIndex, hasStage:!!stage, existingInsight: existingInsight || null });
+    return () => console.log("[mirror] StepScreen UNMOUNT", { step:step.key });
+  }, []);
+
+  useEffect(() => { if (msgs.length === 0 && !showStage) open(); }, [picked]);
 
   async function open() {
+    console.log("[mirror] open() firing", { step:step.key, picked: picked ? picked.id : null });
     setLoading(true);
     try {
-      const reply = await callClaude([{ role:"user", content:"Begin." }], STEP_PROMPTS[step.key], null, 600);
+      const openingUser = (stage && picked)
+        ? { role:"user", content: stage.openingPrompt(picked), hidden:true }
+        : { role:"user", content:"Begin.", hidden:true };
+      const reply = await callClaude(forApi([openingUser]), STEP_PROMPTS[step.key], null, 600);
       const found = extractInsight(reply);
-      setMsgs([{ role:"assistant", content:stripInsight(reply) }]);
+      setMsgs([openingUser, { role:"assistant", content:stripInsight(reply) }]);
       if (found && !existingInsight) { setInsight(found); setEditVal(found); }
-    } catch { setMsgs([{ role:"assistant", content:"Something went wrong. Please reload and try again." }]); }
+    } catch (e) { console.error("[mirror] open() failed", e); setMsgs([{ role:"assistant", content:"Something went wrong. Please reload and try again." }]); }
     setLoading(false);
   }
 
@@ -792,7 +886,7 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
     const history = [...msgs, { role:"user", content:text }];
     setMsgs(history); setInput(""); setLoading(true);
     try {
-      const reply = await callClaude(history, STEP_PROMPTS[step.key], null, 600);
+      const reply = await callClaude(forApi(history), STEP_PROMPTS[step.key], null, 600);
       const found = extractInsight(reply);
       setMsgs(prev => [...prev, { role:"assistant", content:stripInsight(reply) }]);
       if (found) { setInsight(found); setEditVal(found); }
@@ -821,9 +915,13 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
         </div>
       </div>
 
+      {showStage ? (
+        <stage.Component onSelect={setPicked} />
+      ) : (
+      <>
       {/* Conversation */}
       <div style={{ flex:1, padding:"24px 20px 12px", display:"flex", flexDirection:"column", gap:20 }}>
-        {msgs.map((m, i) => (
+        {msgs.filter(m => !m.hidden).map((m, i) => (
           <div key={i} style={{ animation:"fadeUp 0.4s ease both", display:"flex", flexDirection:"column", alignItems:m.role==="user"?"flex-end":"flex-start" }}>
             {m.role==="assistant" ? (
               <div style={{ display:"flex", alignItems:"flex-start", gap:10, maxWidth:"90%" }}>
@@ -894,6 +992,8 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
           </button>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
@@ -975,18 +1075,66 @@ function InductionDNARevealScreen({ dna, onNext }) {
 }
 
 function InductionNextStepsScreen({ dna, onAction }) {
-  function download() {
-    if (!dna) return;
-    const blob = new Blob([`DFINE — BRAND DNA\n${"═".repeat(36)}\n\n${dna}\n\n${"─".repeat(36)}\nGenerated by Dfine · dfine.app`], { type:"text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href=url; a.download="dfine-brand-dna.txt"; a.click(); URL.revokeObjectURL(url);
+  const [dlState, setDlState] = useState(null); // null | "saved" | "copied" | "error"
+
+  function dnaText() {
+    return `DFINE — BRAND DNA\n${"═".repeat(36)}\n\n${dna}\n\n${"─".repeat(36)}\nGenerated by Dfine · dfine.app`;
   }
+
+  async function copyFallback() {
+    try {
+      await navigator.clipboard.writeText(dnaText());
+      setDlState("copied");
+      return true;
+    } catch (e) {
+      console.error("[dfine] clipboard fallback failed", e);
+      return false;
+    }
+  }
+
+  async function download() {
+    if (!dna) { console.warn("[dfine] download called with no DNA"); setDlState("error"); return; }
+    const a = document.createElement("a");
+    const supportsDownload = "download" in a;
+
+    if (!supportsDownload) {
+      // iOS Safari and many in-app webviews ignore the download attribute.
+      console.warn("[dfine] download attribute unsupported — using clipboard fallback");
+      if (!(await copyFallback())) setDlState("error");
+      return;
+    }
+
+    let url;
+    try {
+      const blob = new Blob([dnaText()], { type:"text/plain;charset=utf-8" });
+      url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = "dfine-brand-dna.txt";
+      a.rel = "noopener";
+      // Must be in the DOM for the click to register in Firefox and most mobile browsers.
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setDlState("saved");
+    } catch (e) {
+      console.error("[dfine] download failed", e);
+      if (!(await copyFallback())) setDlState("error");
+    } finally {
+      // Revoking immediately can cancel an in-flight download.
+      if (url) setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+  }
+
+  const dlSub =
+    dlState === "saved"  ? "Saved to your downloads." :
+    dlState === "copied" ? "Copied to your clipboard — paste it somewhere safe." :
+    dlState === "error"  ? "Couldn't save automatically. Try the Brand Dashboard to copy it manually." :
+    "A copy you can reference, share, and build on.";
+
   const opts = [
-    { l:"A", title:"Build your Presence Blueprint", sub:"Define the gap between how you're read now and how you want to be read. Your roadmap for deliberate professional presence.", action:"Build Blueprint", onClick:() => onAction("blueprint"), primary:true },
+    { l:"A", title:"Download your Brand DNA", sub:dlSub, action:dlState==="saved"?"Saved ✓":dlState==="copied"?"Copied ✓":"Download", onClick:download, primary:true },
     { l:"B", title:"Assess your wardrobe",    sub:"Upload items and see how they read against your Brand DNA.", action:"Open Wardrobe", onClick:() => onAction("wardrobe") },
     { l:"C", title:"Your Brand Dashboard",    sub:"Review and refine your Brand DNA, tone, and positioning.", action:"Open Dashboard", onClick:() => onAction("brand") },
-    { l:"D", title:"Download your Brand DNA", sub:"A copy you can reference, share, and build on.", action:"Download", onClick:download },
   ];
   return (
     <div style={{ minHeight:"100vh", maxWidth:500, margin:"0 auto", padding:"48px 22px 48px", display:"flex", flexDirection:"column" }}>
@@ -995,7 +1143,8 @@ function InductionNextStepsScreen({ dna, onAction }) {
         <Cap style={{ marginBottom:9 }}>You're done</Cap>
         <h2 style={{ fontFamily:"var(--serif)", fontSize:28, fontWeight:400, lineHeight:1.1, marginBottom:12 }}>Your Brand DNA is ready.</h2>
         <p style={{ fontSize:14, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>
-          You've defined it. Now build the blueprint for how you'll show up with it on purpose.
+          You've done something most professionals never do — given your presence a clear, deliberate definition.
+          Here's where to take it next.
         </p>
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:9 }}>
@@ -1024,17 +1173,41 @@ function InductionFlow({ onComplete }) {
   const [insights, setInsights] = useState({});
   const [dna,      setDna]      = useState(null);
   const [synth,    setSynth]    = useState(false);
+  const [resumed,  setResumed]  = useState(false);
 
   const stepIndex   = iScreen >= 1 && iScreen <= 6 ? iScreen - 1 : -1;
   const currentStep = stepIndex >= 0 ? STEPS[stepIndex] : null;
 
+  // Resume an in-progress Mirror rather than restarting from screen 0.
+  useEffect(() => {
+    (async () => {
+      const saved = await sGet("dfine:mirrorProgress");
+      if (saved && typeof saved.iScreen === "number" && saved.iScreen >= 1 && saved.iScreen <= 6) {
+        console.log("[mirror] resuming in-progress Mirror", saved);
+        setInsights(saved.insights || {});
+        setIScreen(saved.iScreen);
+      }
+      setResumed(true);
+    })();
+  }, []);
+
+  // Persist progress on every change, once resume has settled.
+  useEffect(() => {
+    if (!resumed) return;
+    if (iScreen >= 1 && iScreen <= 6) sSet("dfine:mirrorProgress", { iScreen, insights });
+  }, [iScreen, insights, resumed]);
+
   function advance() { setIScreen(s => s+1); window.scrollTo({ top:0 }); }
 
   function handleStepDone(key, insight) {
-    const updated = { ...insights, [key]: insight };
-    setInsights(updated);
-    if (stepIndex < STEPS.length-1) { setIScreen(iScreen+1); window.scrollTo({ top:0 }); }
-    else synthesise(updated);
+    console.log("[mirror] handleStepDone", { key, stepIndex, iScreen, isLast: stepIndex >= STEPS.length-1 });
+    setInsights(prev => ({ ...prev, [key]: insight }));
+    if (stepIndex < STEPS.length-1) {
+      setIScreen(s => { console.log("[mirror] setIScreen", s, "->", s+1); return s+1; });
+      window.scrollTo({ top:0 });
+    } else {
+      synthesise({ ...insights, [key]: insight });
+    }
   }
 
   async function synthesise(all) {
@@ -1042,14 +1215,17 @@ function InductionFlow({ onComplete }) {
     try {
       const result = await callClaude([{ role:"user", content:"Synthesise my Brand DNA." }], DNA_SYNTHESIS_PROMPT(all), null, 700);
       setDna(result.trim());
-    } catch { setDna("Unable to synthesise at this time. Please try again."); }
+    } catch (e) { console.error("[mirror] synthesis failed", e); setDna("Unable to synthesise at this time. Please try again."); }
     setSynth(false);
+    sDel("dfine:mirrorProgress");
   }
 
   function handleAction(action) {
+    sDel("dfine:mirrorProgress");
     onComplete({ insights, dna, action });
   }
 
+  if (!resumed) return null;
   if (iScreen === 0) return <InductionProcessScreen onNext={advance} />;
   if (currentStep)   return <InductionStepScreen key={currentStep.key} step={currentStep} stepIndex={stepIndex} totalSteps={STEPS.length} onComplete={insight => handleStepDone(currentStep.key, insight)} existingInsight={insights[currentStep.key]||null} />;
   if (iScreen === 7 && synth) return <InductionSynthesisingScreen />;
@@ -3184,7 +3360,6 @@ export default function App() {
   const [stepInsights, setStepInsights] = useState({});
   const [stepMessages, setStepMessages] = useState({});
   const [brandDNA, setBrandDNA]         = useState("");
-  const [blueprint, setBlueprint]       = useState(null);
   const [wardrobe, setWardrobe]         = useState([]);
   const [considering, setConsidering]   = useState([]);
   const [signature, setSignature]       = useState({});
@@ -3193,7 +3368,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const [dna, insights, msgs, wrd, sig, seen, cons, bp] = await Promise.all([
+      const [dna, insights, msgs, wrd, sig, seen, cons] = await Promise.all([
         sGet("dfine:brandDNA"),
         sGet("dfine:stepInsights"),
         sGet("dfine:stepMessages"),
@@ -3201,7 +3376,6 @@ export default function App() {
         sGet("dfine:signature"),
         sGet("dfine:onboardingSeen"),
         sGet("dfine:considering"),
-        sGet("dfine:blueprint"),
       ]);
       if (dna)      setBrandDNA(dna);
       if (insights) setStepInsights(insights);
@@ -3209,7 +3383,6 @@ export default function App() {
       if (wrd)      setWardrobe(wrd);
       if (sig)      setSignature(sig);
       if (cons)     setConsidering(cons);
-      if (bp)       setBlueprint(bp);
       const hasProgress = (insights && Object.keys(insights).length > 0) || !!dna;
       if (!seen || !hasProgress) setShowOnboarding(true);
       setHydrated(true);
@@ -3222,7 +3395,6 @@ export default function App() {
   useEffect(() => { if (hydrated) sSet("dfine:wardrobe",     wardrobe);     }, [wardrobe, hydrated]);
   useEffect(() => { if (hydrated) sSet("dfine:signature",    signature);    }, [signature, hydrated]);
   useEffect(() => { if (hydrated) sSet("dfine:considering",  considering);  }, [considering, hydrated]);
-  useEffect(() => { if (hydrated) sSet("dfine:blueprint",    blueprint);    }, [blueprint, hydrated]);
 
   const completeOnboarding = () => {
     sSet("dfine:onboardingSeen", true);
@@ -3252,15 +3424,14 @@ export default function App() {
   return (
     <>
       <GlobalStyles />
-      <Nav screen={screen} setScreen={setScreen} wardrobeCount={wardrobe.length} consideringCount={considering.length} hasDNA={!!brandDNA} hasBlueprint={!!(blueprint?.presenceStatement)} onShowOnboarding={() => setShowOnboarding(true)} />
+      <Nav screen={screen} setScreen={setScreen} wardrobeCount={wardrobe.length} consideringCount={considering.length} hasDNA={!!brandDNA} onShowOnboarding={() => setShowOnboarding(true)} />
       {screen===SCREENS.HOME        && <HomeScreen setScreen={setScreen} hasDNA={!!brandDNA} />}
       {screen===SCREENS.INDUCTION   && <InductionFlow onComplete={({ insights, dna, action }) => {
         if (insights) setStepInsights(prev => ({ ...prev, ...insights }));
         if (dna)      setBrandDNA(dna);
-        setScreen(action==="blueprint" ? SCREENS.BLUEPRINT : action==="wardrobe" ? SCREENS.WARDROBE : SCREENS.BRAND);
+        setScreen(action==="wardrobe" ? SCREENS.WARDROBE : SCREENS.BRAND);
       }} />}
       {screen===SCREENS.BRAND       && <BrandScreen stepInsights={stepInsights} setStepInsights={setStepInsights} stepMessages={stepMessages} setStepMessages={setStepMessages} brandDNA={brandDNA} setBrandDNA={setBrandDNA} />}
-      {screen===SCREENS.BLUEPRINT   && <BlueprintScreen blueprint={blueprint} stepInsights={stepInsights} brandDNA={brandDNA} setBlueprint={setBlueprint} setScreen={setScreen} />}
       {screen===SCREENS.SIGNATURE   && <SignatureScreen brandDNA={brandDNA} signature={signature} setSignature={setSignature} setScreen={setScreen} />}
       {screen===SCREENS.ABOUT       && <AboutScreen brandDNA={brandDNA} />}
       {screen===SCREENS.WARDROBE    && <WardrobeScreen wardrobe={wardrobe} setWardrobe={setWardrobe} brandDNA={brandDNA} />}
@@ -3269,9 +3440,3 @@ export default function App() {
     </>
   );
 }
-
-
-
-
-
-
