@@ -502,7 +502,7 @@ When they confirm or refine it to where it's right, wrap the agreed version in <
 You're describing what you're hearing, not prescribing what they should be. They'll know when it's right.`,
 };
 
-const DNA_SYNTHESIS_PROMPT = (insights) => `You are synthesising a complete Brand DNA profile from six discovery insights.
+const DNA_SYNTHESIS_PROMPT = (insights) => `You are synthesising a complete Professional Definition profile from six discovery insights.
 
 INSIGHTS:
 Positioning: ${insights.positioning || "not captured"}
@@ -512,9 +512,9 @@ Tone: ${insights.tone || "not captured"}
 Key Message: ${insights.message || "not captured"}
 Style Direction: ${insights.style || "not captured"}
 
-Write a cohesive Brand DNA profile. Output ONLY these six lines, each starting with the exact label shown, followed by a colon. No preamble, no headings, no bold, no bullet points, no closing remarks.
+Write a cohesive Professional Definition profile. Output ONLY these six lines, each starting with the exact label shown, followed by a colon. No preamble, no headings, no bold, no bullet points, no closing remarks.
 
-Professional Archetype: [stance name — a short evocative title, 2-4 words]
+Professional Stance: [stance name — a short evocative title, 2-4 words]
 Positioning: [one sentence]
 Audience: [specific audience]
 Tone: [3-5 words + brief description]
@@ -526,7 +526,7 @@ Be precise. Distil rather than summarise. This should feel like seeing yourself 
 // Single item assessment
 const buildWardrobeSystem = (dna) => `You are a perceptive style confidant working within a peer-reviewed research framework (Hester & Hehman, 2023). Reflect on what this clothing item actually communicates across four dimensions.
 
-${dna ? `BRAND DNA:\n${dna}` : "No brand profile yet. Reflect on what this projects professionally in a general register."}
+${dna ? `PROFESSIONAL DEFINITION:\n${dna}` : "No brand profile yet. Reflect on what this projects professionally in a general register."}
 
 CONTEXT PRINCIPLE: If no occasion is stated, read this item in a general professional register and note where the read may shift with context. An item cannot be fully decoded in isolation from setting.
 
@@ -541,14 +541,14 @@ Return ONLY valid JSON:
   "itemDescription": "Type, colour, cut, fabric — as you'd tell a friend (max 20 words)",
   "read": "✦ Strongly On Brand",
   "brandTags": ["Considered","Warm Authority"],
-  "assessment": "**What I Notice**\\n2 sentences on what this item projects — reference social category and status signals specifically.\\n\\n**How It Fits Your Story**\\nHow it serves or undermines their Brand DNA across cognitive state alignment and aesthetic coherence. Note any context dependency.\\n\\n**Read**\\n✦ Strongly On Brand\\n\\n**My Honest Take**\\nWhen to wear it. When not to. If no occasion was given, note where context would shift this read."
+  "assessment": "**What I Notice**\\n2 sentences on what this item projects — reference social category and status signals specifically.\\n\\n**How It Fits Your Story**\\nHow it serves or undermines their Professional Definition across cognitive state alignment and aesthetic coherence. Note any context dependency.\\n\\n**Read**\\n✦ Strongly On Brand\\n\\n**My Honest Take**\\nWhen to wear it. When not to. If no occasion was given, note where context would shift this read."
 }
 Read: "✦ Strongly On Brand" | "◈ On Brand with Caveats" | "✕ Brand Misalignment"`;
 
-// Outfit snap — detects all items, reads signals, assesses against Brand DNA
+// Outfit snap — detects all items, reads signals, assesses against Professional Definition
 const buildOutfitSnapSystem = (dna) => `You are a perceptive style confidant and professional signal analyst working within a peer-reviewed research framework (Hester & Hehman, 2023). Analyse this complete outfit photograph across four dimensions.
 
-${dna ? `BRAND DNA:\n${dna}\n` : "No brand profile yet — give general professional signal analysis across the four dimensions.\n"}
+${dna ? `PROFESSIONAL DEFINITION:\n${dna}\n` : "No brand profile yet — give general professional signal analysis across the four dimensions.\n"}
 
 CONTEXT PRINCIPLE: If no occasion has been specified, read this outfit in a general professional register. Make clear in your outfitRead where the analysis may shift with context — the same outfit reads differently against different occasions.
 
@@ -587,7 +587,7 @@ const buildDressSystem = (dna, wardrobe) => {
   const inv = wardrobe.map(i => `[${i.id}] ${i.name} (${i.category}): ${i.description}${i.verdict?` — ${i.verdict}`:""}`).join("\n") || "Empty.";
   return `You are a trusted style confidant. Help this person show up as themselves for whatever they're walking into.
 
-${dna ? `BRAND DNA:\n${dna}\n` : "No brand profile.\n"}WARDROBE:\n${inv}
+${dna ? `PROFESSIONAL DEFINITION:\n${dna}\n` : "No brand profile.\n"}WARDROBE:\n${inv}
 
 Return ONLY valid JSON:
 {
@@ -598,7 +598,7 @@ Return ONLY valid JSON:
 
 const buildLinkedInSystem = (dna) => `You are a gifted professional writer. Your job is to write a LinkedIn summary that sounds unmistakably like this specific person — not like a LinkedIn profile, not like a CV, not like everyone else.
 
-BRAND DNA:
+PROFESSIONAL DEFINITION:
 ${dna}
 
 Write in first person. Draw directly from their positioning, professional stance, tone, and key message. The voice must match their tone exactly — if they are direct, be direct. If they have dry wit, let it show. If they are warm, be warm.
@@ -609,7 +609,7 @@ Return ONLY the LinkedIn summary text. No preamble, no explanation, no formattin
 
 const buildElevatorPitchSystem = (dna) => `You are a gifted speechwriter. Your job is to write an elevator pitch that sounds like this person speaking — natural, confident, completely their own.
 
-BRAND DNA:
+PROFESSIONAL DEFINITION:
 ${dna}
 
 Write for spoken delivery — approximately 60 seconds when read aloud (around 130–150 words). First person. Their exact tone and register. It should open with something that creates immediate interest, establish their positioning and professional stance within the first few lines, and land cleanly on their key message.
@@ -620,7 +620,7 @@ Return ONLY the elevator pitch text. No preamble, no explanation, no formatting 
 
 const buildAboutSystem = (dna) => `You are a gifted professional writer. Your job is to write a single "About" paragraph — 3 to 4 sentences — that this person can drop into any professional introduction: a bio, a LinkedIn about section, a pitch deck, a conference program, an email signature context, or a spoken introduction.
 
-BRAND DNA:
+PROFESSIONAL DEFINITION:
 ${dna}
 
 This is not a bio. It is not a CV summary. It is the core unit of self-presentation from which every other format is adapted.
@@ -637,7 +637,7 @@ Return ONLY the paragraph text. No preamble, no explanation, no formatting. 3–
 // Prospective purchase assessment — Change-Room Validator
 const buildChangeRoomSystem = (dna, context) => `You are a perceptive style confidant helping someone make a purchasing decision — not auditing what they own. This is a prospective purchase assessment: the user is considering buying this item right now.
 
-${dna ? `BRAND DNA:\n${dna}\n` : "No brand profile yet. Assess in a general professional register.\n"}
+${dna ? `PROFESSIONAL DEFINITION:\n${dna}\n` : "No brand profile yet. Assess in a general professional register.\n"}
 ${context?.occasion ? `OCCASION: ${context.occasion}` : ""}
 ${context?.retailer ? `RETAILER: ${context.retailer}` : ""}
 
@@ -813,7 +813,7 @@ function InductionProcessScreen({ onNext }) {
           </h2>
           <p style={{ fontSize:14, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>
             Each conversation explores one dimension of your professional identity.
-            At the end, we synthesise everything into your Brand DNA — a precise articulation
+            At the end, we synthesise everything into your Professional Definition — a precise articulation
             you'll use across every professional surface.
           </p>
         </div>
@@ -1001,7 +1001,7 @@ function InductionStepScreen({ step, stepIndex, totalSteps, onComplete, existing
 
 function InductionSynthesisingScreen() {
   const [si, setSi] = useState(0);
-  const stages = ["Reading what you said…","Finding the pattern…","Distilling the signal…","Composing your Brand DNA…"];
+  const stages = ["Reading what you said…","Finding the pattern…","Distilling the signal…","Composing your Professional Definition…"];
   useEffect(() => { const t = setInterval(() => setSi(i => (i+1)%stages.length), 2000); return () => clearInterval(t); }, []);
   return (
     <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:28, padding:48 }}>
@@ -1044,7 +1044,7 @@ function InductionDNARevealScreen({ dna, onNext }) {
   if (parsed.brand_tags) parsed.tags = parsed.brand_tags.split(",").map(t=>t.trim()).filter(Boolean);
 
   const fields = [
-    { key:"archetype",       label:"Professional Archetype", hero:true },
+    { key:"archetype",       label:"Professional Stance", hero:true },
     { key:"positioning",     label:"Positioning" },
     { key:"audience",        label:"Audience" },
     { key:"tone",            label:"Tone" },
@@ -1062,7 +1062,7 @@ function InductionDNARevealScreen({ dna, onNext }) {
       <div style={{ animation:"fadeUp 0.6s ease both", marginBottom:30, display:"flex", alignItems:"flex-start", gap:13 }}>
         <div style={{ marginTop:3 }}><MirrorMark size={26} /></div>
         <div>
-          <Cap style={{ marginBottom:7 }}>Brand DNA</Cap>
+          <Cap style={{ marginBottom:7 }}>Professional Definition</Cap>
           <h2 style={{ fontFamily:"var(--serif)", fontSize:30, fontWeight:400, lineHeight:1.08, marginBottom:9 }}>This is you.</h2>
           <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>Six conversations. One clear picture. Everything you just articulated, distilled.</p>
         </div>
@@ -1097,73 +1097,178 @@ function InductionDNARevealScreen({ dna, onNext }) {
 }
 
 function InductionNextStepsScreen({ dna, onAction }) {
-  const [dlState, setDlState] = useState(null); // null | "saved" | "copied" | "error"
+  const [dlState, setDlState] = useState(null); // null | "opened" | "copied" | "error"
 
-  function dnaText() {
-    return `DFINE — BRAND DNA\n${"═".repeat(36)}\n\n${dna}\n\n${"─".repeat(36)}\nGenerated by Dfine · dfine.app`;
+  function dnaFields() {
+    const lines = (dna||"").split("\n").filter(l=>l.trim());
+    const parsed = {};
+    for (const ln of lines) {
+      const m = ln.match(/^\s*\**\s*([A-Za-z][A-Za-z\s\/]{2,30}?)\s*\**\s*:\s*\**\s*(.+?)\s*\**\s*$/);
+      if (m) parsed[m[1].trim().toLowerCase().replace(/[\s\/]+/g,"_")] = m[2].trim();
+    }
+    const pick = (...keys) => { for (const k of keys) if (parsed[k]) return parsed[k]; return ""; };
+    return {
+      archetype:  pick("professional_archetype","professional_stance","archetype","stance"),
+      positioning:pick("positioning","position"),
+      audience:   pick("audience"),
+      tone:       pick("tone"),
+      message:    pick("key_message","message"),
+      style:      pick("style_direction","style"),
+    };
+  }
+
+  function esc(s) {
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function printSheetHTML() {
+    const f = dnaFields();
+    const today = new Date().toLocaleDateString("en-AU", { day:"numeric", month:"long", year:"numeric" });
+    const field = (label, value) => value ? `
+      <section class="field">
+        <p class="label">${esc(label)}</p>
+        <p class="value">${esc(value)}</p>
+      </section>` : "";
+
+    return `<!doctype html>
+<html lang="en-AU"><head><meta charset="utf-8">
+<title>Professional Definition — Dfine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#F8F7F5; --ink:#141412; --teal:#1D9E75; --muted:#767470;
+    --rule:rgba(20,20,18,0.13);
+    --serif:'Cormorant Garamond',Georgia,serif;
+    --sans:'Jost',system-ui,sans-serif;
+  }
+  @page { size:A4; margin:20mm 18mm; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-weight:300;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+    -webkit-font-smoothing:antialiased;
+  }
+  .sheet { max-width:150mm; margin:0 auto; padding:4mm 0 0; }
+
+  /* Masthead */
+  .mast { display:flex; align-items:center; gap:9px; margin-bottom:15mm; }
+  .ring { width:13px; height:13px; border-radius:50%; border:1.5px solid var(--teal);
+          display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+  .ring i { width:5px; height:5px; border-radius:50%; background:var(--teal); display:block; }
+  .mast .wordmark { font-family:var(--serif); font-size:17px; font-weight:400; letter-spacing:0.01em; }
+  .mast .kicker { margin-left:auto; font-size:8.5px; font-weight:400; letter-spacing:0.22em;
+                  text-transform:uppercase; color:var(--muted); }
+
+  /* Title plate — the archetype is the name of who they are */
+  .plate { margin-bottom:12mm; }
+  .plate .eyebrow { font-size:8.5px; font-weight:500; letter-spacing:0.22em; text-transform:uppercase;
+                    color:var(--teal); margin:0 0 12px; }
+  .plate h1 { font-family:var(--serif); font-style:italic; font-weight:300;
+              font-size:40px; line-height:1.16; letter-spacing:-0.01em; margin:0 0 14px; }
+  .plate .rule { width:52px; height:1px; background:var(--teal); }
+
+  /* Fields */
+  .field { margin-bottom:8.5mm; break-inside:avoid; page-break-inside:avoid; }
+  .field .label { font-size:8.5px; font-weight:500; letter-spacing:0.2em; text-transform:uppercase;
+                  color:var(--muted); margin:0 0 7px; }
+  .field .value { font-family:var(--serif); font-weight:300; font-size:15.5px; line-height:1.68;
+                  margin:0; padding-top:9px; border-top:1px solid var(--rule); }
+
+  /* Colophon */
+  .colophon { margin-top:11mm; padding-top:7px; border-top:1px solid var(--rule);
+              display:flex; justify-content:space-between; align-items:baseline;
+              font-size:8.5px; letter-spacing:0.16em; text-transform:uppercase; color:var(--muted); }
+  .colophon .site { color:var(--teal); }
+
+  .hint { position:fixed; left:0; right:0; bottom:0; padding:11px 16px; text-align:center;
+          background:var(--ink); color:#F8F7F5; font-size:12px; letter-spacing:0.03em; }
+  .hint b { font-weight:500; }
+  @media print { .hint { display:none; } }
+</style></head>
+<body>
+  <div class="sheet">
+    <header class="mast">
+      <span class="ring"><i></i></span>
+      <span class="wordmark">Dfine</span>
+      <span class="kicker">Professional Definition</span>
+    </header>
+
+    <div class="plate">
+      <p class="eyebrow">Professional Stance</p>
+      <h1>${esc(f.archetype || "Your Professional Definition")}</h1>
+      <div class="rule"></div>
+    </div>
+
+    ${field("Positioning", f.positioning)}
+    ${field("Audience", f.audience)}
+    ${field("Tone", f.tone)}
+    ${field("Key Message", f.message)}
+    ${field("Style Direction", f.style)}
+
+    <div class="colophon">
+      <span>Defined ${esc(today)}</span>
+      <span class="site">dfine.app</span>
+    </div>
+  </div>
+  <div class="hint">Choose <b>Save as PDF</b> as the destination to keep a copy.</div>
+  <script>
+    window.addEventListener("load", function(){
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(function(){ setTimeout(function(){ window.print(); }, 350); });
+      } else {
+        setTimeout(function(){ window.print(); }, 900);
+      }
+    });
+  <\/script>
+</body></html>`;
   }
 
   async function copyFallback() {
     try {
-      await navigator.clipboard.writeText(dnaText());
+      const f = dnaFields();
+      const text = `DFINE — PROFESSIONAL DEFINITION\n${"═".repeat(36)}\n\n${dna}\n\n${"─".repeat(36)}\nGenerated by Dfine · dfine.app`;
+      await navigator.clipboard.writeText(text);
       setDlState("copied");
       return true;
-    } catch (e) {
-      console.error("[dfine] clipboard fallback failed", e);
-      return false;
-    }
+    } catch (e) { console.error("[dfine] clipboard fallback failed", e); return false; }
   }
 
   async function download() {
     if (!dna) { console.warn("[dfine] download called with no DNA"); setDlState("error"); return; }
-    const a = document.createElement("a");
-    const supportsDownload = "download" in a;
-
-    if (!supportsDownload) {
-      // iOS Safari and many in-app webviews ignore the download attribute.
-      console.warn("[dfine] download attribute unsupported — using clipboard fallback");
-      if (!(await copyFallback())) setDlState("error");
-      return;
-    }
-
-    let url;
     try {
-      const blob = new Blob([dnaText()], { type:"text/plain;charset=utf-8" });
-      url = URL.createObjectURL(blob);
-      a.href = url;
-      a.download = "dfine-brand-dna.txt";
-      a.rel = "noopener";
-      // Must be in the DOM for the click to register in Firefox and most mobile browsers.
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setDlState("saved");
+      const w = window.open("", "_blank");
+      if (!w) throw new Error("Popup blocked");
+      w.document.open();
+      w.document.write(printSheetHTML());
+      w.document.close();
+      setDlState("opened");
     } catch (e) {
-      console.error("[dfine] download failed", e);
+      console.error("[dfine] print sheet failed", e);
       if (!(await copyFallback())) setDlState("error");
-    } finally {
-      // Revoking immediately can cancel an in-flight download.
-      if (url) setTimeout(() => URL.revokeObjectURL(url), 30000);
     }
   }
 
   const dlSub =
-    dlState === "saved"  ? "Saved to your downloads." :
+    dlState === "opened" ? "Opened in a new tab — choose Save as PDF." :
     dlState === "copied" ? "Copied to your clipboard — paste it somewhere safe." :
-    dlState === "error"  ? "Couldn't save automatically. Try the Brand Dashboard to copy it manually." :
-    "A copy you can reference, share, and build on.";
+    dlState === "error"  ? "Couldn't open the document. Allow pop-ups, or copy it from your Definition Dashboard." :
+    "A designed copy you can keep, print, and share.";
 
   const opts = [
-    { l:"A", title:"Download your Brand DNA", sub:dlSub, action:dlState==="saved"?"Saved ✓":dlState==="copied"?"Copied ✓":"Download", onClick:download, primary:true },
-    { l:"B", title:"Assess your wardrobe",    sub:"Upload items and see how they read against your Brand DNA.", action:"Open Wardrobe", onClick:() => onAction("wardrobe") },
-    { l:"C", title:"Your Brand Dashboard",    sub:"Review and refine your Brand DNA, tone, and positioning.", action:"Open Dashboard", onClick:() => onAction("brand") },
+    { l:"A", title:"Download your Professional Definition", sub:dlSub, action:dlState==="opened"?"Opened ✓":dlState==="copied"?"Copied ✓":"Download", onClick:download, primary:true },
+    { l:"B", title:"Assess your wardrobe",    sub:"Upload items and see how they read against your Professional Definition.", action:"Open Wardrobe", onClick:() => onAction("wardrobe") },
+    { l:"C", title:"Your Definition Dashboard",    sub:"Review and refine your Professional Definition, tone, and positioning.", action:"Open Dashboard", onClick:() => onAction("brand") },
   ];
   return (
     <div style={{ minHeight:"100vh", maxWidth:500, margin:"0 auto", padding:"48px 22px 48px", display:"flex", flexDirection:"column" }}>
       <div style={{ animation:"fadeUp 0.6s ease both", marginBottom:36 }}>
         <div style={{ width:46, height:46, borderRadius:"50%", border:"1.5px solid var(--teal)", display:"flex", alignItems:"center", justifyContent:"center", marginBottom:22 }}><MirrorMark size={20} /></div>
         <Cap style={{ marginBottom:9 }}>You're done</Cap>
-        <h2 style={{ fontFamily:"var(--serif)", fontSize:28, fontWeight:400, lineHeight:1.1, marginBottom:12 }}>Your Brand DNA is ready.</h2>
+        <h2 style={{ fontFamily:"var(--serif)", fontSize:28, fontWeight:400, lineHeight:1.1, marginBottom:12 }}>Your Professional Definition is ready.</h2>
         <p style={{ fontSize:14, color:"var(--muted)", lineHeight:1.8, fontWeight:300 }}>
           You've done something most professionals never do — given your presence a clear, deliberate definition.
           Here's where to take it next.
@@ -1235,7 +1340,7 @@ function InductionFlow({ onComplete }) {
   async function synthesise(all) {
     setSynth(true); setIScreen(7); window.scrollTo({ top:0 });
     try {
-      const result = await callClaude([{ role:"user", content:"Synthesise my Brand DNA." }], DNA_SYNTHESIS_PROMPT(all), null, 700);
+      const result = await callClaude([{ role:"user", content:"Synthesise my Professional Definition." }], DNA_SYNTHESIS_PROMPT(all), null, 700);
       setDna(result.trim());
     } catch (e) { console.error("[mirror] synthesis failed", e); setDna("Unable to synthesise at this time. Please try again."); }
     setSynth(false);
@@ -1262,7 +1367,7 @@ function HomeScreen({ setScreen, hasDNA }) {
     { n:"01", t:"The Mirror",      d:"A guided conversation that surfaces who you are and who you're projecting. Often not the same thing." },
     { n:"02", t:"Your Wardrobe",   d:"Every item assessed against your brand. Snap an outfit or add items one by one." },
     { n:"03", t:"Dress For…",      d:"Describe the moment. We find the look from what you already own." },
-    { n:"04", t:"Change Room",     d:"Considering a purchase? Validate it against your Brand DNA before checkout." },
+    { n:"04", t:"Change Room",     d:"Considering a purchase? Validate it against your Professional Definition before checkout." },
   ];
   return (
     <div style={{ minHeight:"100vh", paddingTop:56, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"56px 24px 48px" }}>
@@ -1479,7 +1584,7 @@ function BrandScreen({ stepInsights, setStepInsights, stepMessages, setStepMessa
 
   const synthesiseDNA = async () => {
     setSynthesising(true);
-    try { const reply = await callClaude([{ role:"user", content:"Please synthesise my Brand DNA." }], DNA_SYNTHESIS_PROMPT(stepInsights)); setBrandDNA(reply.trim()); }
+    try { const reply = await callClaude([{ role:"user", content:"Please synthesise my Professional Definition." }], DNA_SYNTHESIS_PROMPT(stepInsights)); setBrandDNA(reply.trim()); }
     catch { setBrandDNA("Unable to synthesise — please try again."); }
     setSynthesising(false);
   };
@@ -1613,7 +1718,7 @@ function BrandScreen({ stepInsights, setStepInsights, stepMessages, setStepMessa
                 style={{ width:"100%", background:"var(--bg)", border:"none", fontFamily:"var(--sans)", fontSize:12, fontWeight:500, letterSpacing:"0.18em", textTransform:"uppercase", padding:"18px", cursor:synthesising?"default":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:12, color:"var(--ink)" }}
                 onMouseEnter={e => { if(!synthesising) e.currentTarget.style.background="var(--surface)"; }}
                 onMouseLeave={e => e.currentTarget.style.background="var(--bg)"}>
-                {synthesising ? <><Spinner size={14} /><span>Synthesising your Brand DNA…</span></> : "✦ Generate My Brand DNA"}
+                {synthesising ? <><Spinner size={14} /><span>Synthesising your Professional Definition…</span></> : "✦ Generate My Professional Definition"}
               </button>
             </div>
           </div>
@@ -1621,7 +1726,7 @@ function BrandScreen({ stepInsights, setStepInsights, stepMessages, setStepMessa
 
         {brandDNA && (
           <div style={{ marginTop:28, padding:"28px 26px", background:"white", borderTop:"3px solid var(--teal)", animation:"pop 0.5s ease both", boxShadow:"var(--shadow-md)" }}>
-            <Cap style={{ marginBottom:14 }}>Your Brand DNA</Cap>
+            <Cap style={{ marginBottom:14 }}>Your Professional Definition</Cap>
             <pre style={{ fontFamily:"var(--sans)", fontSize:13, lineHeight:1.9, whiteSpace:"pre-wrap", color:"var(--ink)", fontWeight:300 }}>{brandDNA}</pre>
             <button onClick={() => setBrandDNA("")} style={{ marginTop:20, background:"none", border:"none", color:"var(--muted)", fontFamily:"var(--sans)", fontSize:10, letterSpacing:"0.12em", textTransform:"uppercase", cursor:"pointer" }}>Regenerate</button>
           </div>
@@ -1861,7 +1966,7 @@ function WardrobeScreen({ wardrobe, setWardrobe, brandDNA }) {
             // Snap upload
             <div style={{ animation:"fadeUp 0.4s ease both" }}>
               <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.8, fontWeight:300, marginBottom:24, maxWidth:480 }}>
-                Photograph your complete outfit. Every visible item will be detected, assessed against your Brand DNA, and added to your wardrobe automatically.
+                Photograph your complete outfit. Every visible item will be detected, assessed against your Professional Definition, and added to your wardrobe automatically.
               </p>
 
               {/* Hidden file input — no capture attribute so file picker works everywhere */}
@@ -1913,7 +2018,7 @@ function WardrobeScreen({ wardrobe, setWardrobe, brandDNA }) {
 
               {brandDNA && (
                 <div style={{ marginTop:20, padding:"12px 16px", background:"var(--teal-bg)", borderLeft:"3px solid var(--teal)" }}>
-                  <Cap style={{ marginBottom:4, fontSize:9 }}>Brand DNA Active</Cap>
+                  <Cap style={{ marginBottom:4, fontSize:9 }}>Definition Active</Cap>
                   <p style={{ fontSize:12, color:"var(--muted)", lineHeight:1.6, fontWeight:300 }}>Each detected item will be assessed against your professional stance, tone, and positioning.</p>
                 </div>
               )}
@@ -1978,7 +2083,7 @@ function WardrobeScreen({ wardrobe, setWardrobe, brandDNA }) {
                 </div>
               </div>
 
-              {brandDNA && <div style={{ padding:"12px 16px", background:"var(--teal-bg)", borderLeft:"3px solid var(--teal)" }}><Cap style={{ marginBottom:4, fontSize:9 }}>Brand DNA Active</Cap><p style={{ fontSize:12, color:"var(--muted)", lineHeight:1.6, fontWeight:300 }}>Assessment references your professional stance, tone, and positioning.</p></div>}
+              {brandDNA && <div style={{ padding:"12px 16px", background:"var(--teal-bg)", borderLeft:"3px solid var(--teal)" }}><Cap style={{ marginBottom:4, fontSize:9 }}>Definition Active</Cap><p style={{ fontSize:12, color:"var(--muted)", lineHeight:1.6, fontWeight:300 }}>Assessment references your professional stance, tone, and positioning.</p></div>}
 
               {/* Save buttons */}
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -2136,9 +2241,9 @@ function SignatureScreen({ brandDNA, signature, setSignature, setScreen }) {
             <div style={{ width:58, height:58, borderRadius:"50%", border:"1.5px solid var(--bstrong)", margin:"0 auto 22px", display:"flex", alignItems:"center", justifyContent:"center" }}>
               <div style={{ width:20, height:20, borderRadius:"50%", border:"1.5px solid var(--teal-lt)" }} />
             </div>
-            <p style={{ fontFamily:"var(--serif)", fontSize:20, marginBottom:10, fontWeight:300 }}>Your Brand DNA isn&#39;t ready yet</p>
+            <p style={{ fontFamily:"var(--serif)", fontSize:20, marginBottom:10, fontWeight:300 }}>Your Professional Definition isn&#39;t ready yet</p>
             <p style={{ color:"var(--muted)", fontSize:13, margin:"0 auto 28px", maxWidth:360, fontWeight:300, lineHeight:1.75 }}>
-              Complete The Mirror first. Once your Brand DNA is synthesised, your LinkedIn summary and elevator pitch write themselves from it.
+              Complete The Mirror first. Once your Professional Definition is synthesised, your LinkedIn summary and elevator pitch write themselves from it.
             </p>
             <button onClick={() => setScreen(SCREENS.BRAND)} style={{ background:"var(--ink)", color:"var(--bg)", border:"none", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.16em", textTransform:"uppercase", padding:"13px 28px", cursor:"pointer" }}>
               Go to The Mirror →
@@ -2487,7 +2592,7 @@ const ONBOARDING_SLIDES = [
       { icon:"◎", title:"The Mirror", tag:"Once off — revisited when you've changed", desc:"A structured brand discovery session. Do it once when you're establishing yourself, repositioning, or when you've outgrown your last version. Takes 15 minutes. The output lasts months." },
       { icon:"◈", title:"The Wardrobe", tag:"Ongoing — a daily tool", desc:"Snap an outfit and every item is detected and assessed automatically. Or add items one by one. It gets smarter the more it knows about your brand." },
     ],
-    note: "The Mirror reveals your Brand DNA at the end of the session — not before. The thinking you do along the way is what makes the output specific to you. You'll know why that matters when you get there.",
+    note: "The Mirror reveals your Professional Definition at the end of the session — not before. The thinking you do along the way is what makes the output specific to you. You'll know why that matters when you get there.",
   },
   {
     cap: "What you'll walk away with",
@@ -2508,7 +2613,7 @@ const ONBOARDING_SLIDES = [
     heading: "Two ways in.\nOne catalogue.",
     body: null,
     cards: [
-      { icon:"◎", title:"Snap an Outfit", tag:"Fast — whole outfit at once", desc:"Photograph what you're wearing. Every item is detected automatically, assessed against your Brand DNA, and added to your wardrobe. Do it daily or whenever you get dressed for something that matters." },
+      { icon:"◎", title:"Snap an Outfit", tag:"Fast — whole outfit at once", desc:"Photograph what you're wearing. Every item is detected automatically, assessed against your Professional Definition, and added to your wardrobe. Do it daily or whenever you get dressed for something that matters." },
       { icon:"◈", title:"Add an Item", tag:"Deliberate — one piece at a time", desc:"Photograph a single piece — in a fitting room, from an online listing, from your wardrobe at home. Useful for auditing what you own or assessing a potential purchase before you buy." },
     ],
   },
@@ -2648,7 +2753,7 @@ function AboutScreen({ brandDNA }) {
         {!generated && !loading && (
           <div style={{ animation:"fadeUp 0.5s ease 0.1s both" }}>
             <div style={{ padding:"24px 28px", background:"var(--surface)", border:"1px solid var(--border)", borderLeft:"3px solid var(--teal)", marginBottom:28 }}>
-              <Cap style={{ marginBottom:10, color:"var(--muted)" }}>Drawn from your Brand DNA</Cap>
+              <Cap style={{ marginBottom:10, color:"var(--muted)" }}>Drawn from your Professional Definition</Cap>
               <p style={{ fontSize:13, color:"var(--ink)", lineHeight:1.8, fontWeight:300, fontFamily:"var(--serif)", fontStyle:"italic" }}>
                 {brandDNA.split("\n").slice(0,3).join(" · ")}
               </p>
@@ -2665,7 +2770,7 @@ function AboutScreen({ brandDNA }) {
         {loading && (
           <div style={{ display:"flex", alignItems:"center", gap:14, padding:"32px 0", animation:"fadeIn 0.3s ease both" }}>
             <Spinner size={18} />
-            <p style={{ fontSize:13, color:"var(--muted)", fontStyle:"italic", fontWeight:300 }}>Writing from your Brand DNA…</p>
+            <p style={{ fontSize:13, color:"var(--muted)", fontStyle:"italic", fontWeight:300 }}>Writing from your Professional Definition…</p>
           </div>
         )}
 
@@ -2897,7 +3002,7 @@ function ChangeRoomScreen({ brandDNA, considering, setConsidering }) {
             Try pieces risk-free<br/>in our change room.
           </h3>
           <p style={{ fontSize:13, color:"rgba(255,255,255,0.55)", lineHeight:1.8, fontWeight:300, marginBottom:32, maxWidth:420 }}>
-            See how a prospective purchase aligns with your Brand DNA before you commit.
+            See how a prospective purchase aligns with your Professional Definition before you commit.
             We remember what you considered, approved, and rejected.
           </p>
           <button onClick={() => setView("input")}
@@ -2914,7 +3019,7 @@ function ChangeRoomScreen({ brandDNA, considering, setConsidering }) {
           {[
             { num:"01", label:"Photograph or describe the item", sub:"From a store, online listing, or barcode scan." },
             { num:"02", label:"Set your context", sub:"Tell us the occasion and how urgently you need to decide." },
-            { num:"03", label:"Get a real-time verdict", sub:"On Brand DNA alignment, occasion fit, and whether to buy." },
+            { num:"03", label:"Get a real-time verdict", sub:"On Professional Definition alignment, occasion fit, and whether to buy." },
             { num:"04", label:"Save to your Considering list", sub:"48-hour window to decide — we track what you considered and what you chose." },
           ].map((s, i) => (
             <div key={i} style={{ display:"flex", gap:18, padding:"14px 0", borderBottom: i < 3 ? "1px solid var(--border)" : "none" }}>
@@ -3126,7 +3231,7 @@ function ChangeRoomScreen({ brandDNA, considering, setConsidering }) {
             {preview && <img src={preview} alt="" style={{ width:120, height:120, objectFit:"cover", opacity:0.6 }} />}
             <div style={{ display:"flex", alignItems:"center", gap:14 }}>
               <Spinner size={18} />
-              <p style={{ fontSize:13, color:"var(--muted)", fontStyle:"italic", fontWeight:300 }}>Assessing against your Brand DNA…</p>
+              <p style={{ fontSize:13, color:"var(--muted)", fontStyle:"italic", fontWeight:300 }}>Assessing against your Professional Definition…</p>
             </div>
             <div style={{ width:"100%", maxWidth:320, height:1, background:"var(--border)", position:"relative", overflow:"hidden" }}>
               <div style={{ position:"absolute", inset:0, background:"linear-gradient(90deg, transparent, var(--teal), transparent)", animation:"scanline 1.8s linear infinite" }} />
