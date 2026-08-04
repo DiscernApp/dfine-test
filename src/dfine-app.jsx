@@ -1435,17 +1435,17 @@ function HomeScreen({ setScreen, hasDNA }) {
         ))}
       </div>
 
-      {/* Signl bridge */}
+      {/* First Read bridge */}
       <div style={{ maxWidth:720, width:"100%", marginTop:32, padding:"24px 28px", background:"var(--surface)", border:"1px solid var(--border)", borderLeft:"3px solid var(--teal)", display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:20, flexWrap:"wrap", animation:"fadeUp 0.7s ease 0.3s both" }}>
         <div>
           <Cap style={{ marginBottom:8 }}>Not sure where you stand right now?</Cap>
           <p style={{ fontSize:13, color:"var(--muted)", lineHeight:1.75, fontWeight:300, maxWidth:400 }}>
-            Signl reads the signals you're already sending — from what you wear — before you define anything. A useful starting point if you want to see the gap first.
+            First Read reads the signals you're already sending — from what you wear — before you define anything. A useful starting point if you want to see the gap first.
           </p>
         </div>
         <a href="https://signl.app" target="_blank" rel="noopener noreferrer"
           style={{ display:"inline-flex", alignItems:"center", gap:8, background:"none", color:"var(--teal)", border:"1.5px solid var(--teal)", fontFamily:"var(--sans)", fontSize:11, fontWeight:500, letterSpacing:"0.14em", textTransform:"uppercase", padding:"12px 22px", cursor:"pointer", textDecoration:"none", whiteSpace:"nowrap", flexShrink:0 }}>
-          Try Signl →
+          Try First Read →
         </a>
       </div>
     </div>
